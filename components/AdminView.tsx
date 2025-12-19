@@ -89,19 +89,43 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   }, [showScanner]);
 
   useEffect(() => {
-    if (showFleetMonitor) {
-      refreshData();
-      fleetIntervalRef.current = window.setInterval(async () => {
-        const freshDrivers = await db.getDrivers();
-        setDrivers(freshDrivers);
-      }, 10000);
-    } else {
-      if (fleetIntervalRef.current) clearInterval(fleetIntervalRef.current);
+    if (showScanner) {
+      const timer = setTimeout(() => {
+        // Limpa qualquer instancia anterior para evitar bugs
+        if (scannerRef.current) {
+          scannerRef.current.clear().catch(console.error);
+        }
+
+        const scanner = new Html5QrcodeScanner(
+          "reader",
+          { 
+            fps: 10,
+            // AQUI ESTÁ A MÁGICA PARA O CELULAR:
+            // Em vez de números fixos, usamos uma função que calcula na hora
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+                // Largura: Ocupa 90% da largura da câmera (seja PC ou Celular)
+                const width = Math.floor(viewfinderWidth * 0.9);
+                
+                // Altura: Fixa em 120px (bem fina, estilo leitor de mercado)
+                // Isso cria as "bordas grossas" em cima e embaixo que você quer
+                return { width: width, height: 120 };
+            },
+            aspectRatio: 1.0, // Mantém a proporção quadrada da câmera para caber bem na tela
+            disableFlip: false 
+          },
+          false
+        );
+        
+        scanner.render(onScanSuccess, onScanFailure);
+        scannerRef.current = scanner;
+      }, 100);
+
+      return () => {
+        clearTimeout(timer);
+        if (scannerRef.current) scannerRef.current.clear().catch(console.error);
+      };
     }
-    return () => {
-      if (fleetIntervalRef.current) clearInterval(fleetIntervalRef.current);
-    };
-  }, [showFleetMonitor]);
+  }, [showScanner]);
 
   const refreshData = async () => {
     try {
@@ -190,60 +214,77 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     
     setTimeout(() => {
       const reader = new FileReader();
-      reader.onload = async (e) => {
-        const text = e.target?.result as string;
-        try {
-          const parser = new DOMParser();
-          const xmlDoc = parser.parseFromString(text, "text/xml");
-          const getValue = (tagName: string, context: Document | Element = xmlDoc) => context.getElementsByTagName(tagName)[0]?.textContent || "";
+          reader.onload = async (e) => {
+            const text = e.target?.result as string;
+            try {
+              const parser = new DOMParser();
+              const xmlDoc = parser.parseFromString(text, "text/xml");
+              
+              // Função auxiliar para pegar valor de tag
+              const getValue = (tagName: string, context: Document | Element = xmlDoc) => 
+                context.getElementsByTagName(tagName)[0]?.textContent || "";
 
-          const ide = xmlDoc.getElementsByTagName("ide")[0];
-          const dest = xmlDoc.getElementsByTagName("dest")[0];
-          const enderDest = dest?.getElementsByTagName("enderDest")[0];
-          const total = xmlDoc.getElementsByTagName("total")[0];
+              const ide = xmlDoc.getElementsByTagName("ide")[0];
+              const dest = xmlDoc.getElementsByTagName("dest")[0];
+              const enderDest = dest?.getElementsByTagName("enderDest")[0];
+              const total = xmlDoc.getElementsByTagName("total")[0];
+              
+              // --- NOVO: Lendo Dados Adicionais ---
+              const infAdic = xmlDoc.getElementsByTagName("infAdic")[0];
+              const infCpl = getValue("infCpl", infAdic); // Informações Complementares
+              // ------------------------------------
 
-          if (!dest || !enderDest) throw new Error("XML inválido");
+              if (!dest || !enderDest) throw new Error("XML inválido: Destinatário não encontrado");
 
-          const nNF = getValue("nNF", ide);
-          const serie = getValue("serie", ide);
-          const vNF = getValue("vNF", total);
-          const xNome = getValue("xNome", dest);
-          const CNPJ = getValue("CNPJ", dest);
-          const CPF = getValue("CPF", dest);
-          const xLgr = getValue("xLgr", enderDest);
-          const nro = getValue("nro", enderDest);
-          const xCpl = getValue("xCpl", enderDest);
-          const xBairro = getValue("xBairro", enderDest);
-          const xMun = getValue("xMun", enderDest);
-          const UF = getValue("UF", enderDest);
-          const CEP = getValue("CEP", enderDest);
+              const nNF = getValue("nNF", ide);
+              const serie = getValue("serie", ide);
+              const vNF = getValue("vNF", total);
+              const xNome = getValue("xNome", dest);
+              const CNPJ = getValue("CNPJ", dest);
+              const CPF = getValue("CPF", dest);
+              
+              // Endereço Padrão
+              const xLgr = getValue("xLgr", enderDest);
+              const nro = getValue("nro", enderDest);
+              const xCpl = getValue("xCpl", enderDest);
+              const xBairro = getValue("xBairro", enderDest);
+              const xMun = getValue("xMun", enderDest);
+              const UF = getValue("UF", enderDest);
+              const CEP = getValue("CEP", enderDest);
 
-          const formattedAddress = `${xLgr}, ${nro}${xCpl ? ` (${xCpl})` : ''} - ${xBairro}, ${xMun} - ${UF}`;
+              // Monta o endereço base
+              let formattedAddress = `${xLgr}, ${nro}${xCpl ? ` (${xCpl})` : ''} - ${xBairro}, ${xMun} - ${UF}`;
 
-          let chNFe = getValue("chNFe");
-          if (!chNFe) {
-            const infNFe = xmlDoc.getElementsByTagName("infNFe")[0];
-            const idAttr = infNFe?.getAttribute("Id");
-            if (idAttr && idAttr.startsWith("NFe")) chNFe = idAttr.substring(3);
-          }
+              // --- LÓGICA DO GESTOR ---
+              // Se tiver dados adicionais, adicionamos com destaque ao endereço
+              if (infCpl && infCpl.trim().length > 0) {
+                 formattedAddress += ` || OBS/LOCAL: ${infCpl.toUpperCase()}`;
+              }
 
-          if (!nNF || !xNome) throw new Error("XML incompleto.");
+              let chNFe = getValue("chNFe");
+              if (!chNFe) {
+                const infNFe = xmlDoc.getElementsByTagName("infNFe")[0];
+                const idAttr = infNFe?.getAttribute("Id");
+                if (idAttr && idAttr.startsWith("NFe")) chNFe = idAttr.substring(3);
+              }
 
-          const newInvoice: Invoice = {
-            id: `inv-${Date.now()}`,
-            access_key: chNFe || `GEN${Date.now()}`, 
-            number: nNF,
-            series: serie || '0',
-            customer_name: xNome,
-            customer_doc: CNPJ || CPF || 'Não informado',
-            customer_address: formattedAddress,
-            customer_zip: CEP,
-            value: parseFloat(vNF || "0"),
-            status: DeliveryStatus.PENDING,
-            driver_id: null,
-            vehicle_id: null,
-            created_at: new Date().toISOString(),
-          };
+              if (!nNF || !xNome) throw new Error("XML incompleto.");
+
+              const newInvoice: Invoice = {
+                id: `inv-${Date.now()}`,
+                access_key: chNFe || `GEN${Date.now()}`, 
+                number: nNF,
+                series: serie || '0',
+                customer_name: xNome,
+                customer_doc: CNPJ || CPF || 'Não informado',
+                customer_address: formattedAddress, // Agora inclui a observação
+                customer_zip: CEP,
+                value: parseFloat(vNF || "0"),
+                status: DeliveryStatus.PENDING,
+                driver_id: null,
+                vehicle_id: null,
+                created_at: new Date().toISOString(),
+              };
 
           const exists = invoices.some(i => i.access_key === newInvoice.access_key);
           if (exists) {
