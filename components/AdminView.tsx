@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification } from '../types';
-import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon} from 'lucide-react';
+import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer} from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 
@@ -879,19 +879,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
         </div>
       )}
 
-      {/* Proof Viewer Modal */}
+     {/* Proof Viewer Modal */}
       {viewingProof && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+           {/* ADICIONADO ID: printable-proof */}
+           <div id="printable-proof" className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col relative">
+              
+              {/* CABEÇALHO SÓ PARA IMPRESSÃO (Logotipo no Papel) */}
+              <div className="hidden print:block p-8 border-b border-gray-300 mb-4">
+                 <h1 className="text-2xl font-bold text-slate-900">EntregaCerta | Comprovante Digital</h1>
+                 <p className="text-sm text-slate-500">Documento gerado eletronicamente em {new Date().toLocaleString()}</p>
+              </div>
+
+              {/* Cabeçalho Visual da Tela */}
               <div className={`p-5 text-white flex justify-between items-center ${viewingProof.proof.failure_reason ? 'bg-red-600 dark:bg-red-700' : 'bg-green-600 dark:bg-green-700'}`}>
                  <div>
                     <h3 className="font-bold flex items-center gap-2 text-lg">
                       <FileText size={22} />
                       {viewingProof.proof.failure_reason ? 'Devolução / Falha' : 'Comprovante de Entrega'}
                     </h3>
-                    <p className="text-white/80 text-sm">NF-e {viewingProof.invoice.number}</p>
+                    <p className="text-white/80 text-sm">NF-e {viewingProof.invoice.number} • R$ {viewingProof.invoice.value.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
                  </div>
-                 <button onClick={() => setViewingProof(null)} className="hover:bg-white/20 rounded-full p-2 transition-colors"><X size={24} /></button>
+                 {/* Botão Fechar (Some na impressão) */}
+                 <button onClick={() => setViewingProof(null)} className="hover:bg-white/20 rounded-full p-2 transition-colors no-print"><X size={24} /></button>
               </div>
               
               <div className="overflow-y-auto p-6 space-y-6">
@@ -944,18 +954,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                          <div className="flex items-start gap-3">
                             <Map className="text-slate-400 mt-1" size={18} />
                             <div>
-                               <label className="block text-xs text-slate-500 dark:text-slate-400">Localização</label>
-                               {viewingProof.proof.geo_lat && viewingProof.proof.geo_long ? (
-                                 <a 
+                               <label className="block text-xs text-slate-500 dark:text-slate-400">Localização (GPS)</label>
+                               <span className="font-medium text-slate-800 dark:text-white block">
+                                 {viewingProof.proof.geo_lat ? `${viewingProof.proof.geo_lat}, ${viewingProof.proof.geo_long}` : 'Não capturado'}
+                               </span>
+                               {viewingProof.proof.geo_lat && (
+                                   <a 
                                    href={`https://www.google.com/maps?q=${viewingProof.proof.geo_lat},${viewingProof.proof.geo_long}`} 
                                    target="_blank"
                                    rel="noreferrer"
-                                   className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium"
+                                   className="text-blue-600 dark:text-blue-400 hover:underline text-xs no-print"
                                  >
-                                   Ver no Mapa <ExternalLink size={12} />
+                                   Ver no Google Maps
                                  </a>
-                               ) : (
-                                 <span className="text-slate-400 italic">GPS não capturado</span>
                                )}
                             </div>
                          </div>
@@ -964,50 +975,33 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                 </div>
 
                 {/* Evidence Images */}
-                <div className="grid md:grid-cols-2 gap-6 pt-4 border-t dark:border-slate-700">
+                {/* ADICIONE A CLASSE 'print-evidence-grid' NA DIV ABAIXO */}
+                <div className="grid md:grid-cols-2 gap-6 pt-4 border-t dark:border-slate-700 print-evidence-grid">
                   
-                  {/* COLUNA 1: Assinatura Digital (Com botão de download) */}
+                  {/* COLUNA 1: Assinatura */}
                   <div>
                     <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Assinatura Digital</h4>
-                    <div className="border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 p-2 h-40 flex items-center justify-center shadow-sm relative group">
+                    {/* ADICIONE A CLASSE 'print-signature-box' NA DIV ABAIXO */}
+                    <div className="border border-slate-200 dark:border-slate-600 rounded-lg bg-white p-2 h-40 flex items-center justify-center shadow-sm relative group print-signature-box">
                       {viewingProof.proof.signature_data ? (
-                        <>
-                          <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full dark:invert" />
-                          <button 
-                            onClick={() => {
-                               const link = document.createElement('a');
-                               link.href = viewingProof.proof.signature_data;
-                               link.download = `assinatura_nf${viewingProof.invoice.number}.png`;
-                               document.body.appendChild(link);
-                               link.click();
-                               document.body.removeChild(link);
-                            }}
-                            className="absolute bottom-2 right-2 bg-slate-900 dark:bg-slate-700 text-white p-2 rounded-full shadow-lg hover:bg-slate-700 dark:hover:bg-slate-600 transition-all opacity-90 hover:opacity-100"
-                            title="Baixar Assinatura"
-                          >
-                            <Download size={16} />
-                          </button>
-                        </>
+                        <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" />
                       ) : (
                         <span className="text-slate-400 italic text-sm">Não assinada</span>
                       )}
                     </div>
                   </div>
 
-                  {/* COLUNA 2: Foto / Evidência (Com Zoom) */}
+                  {/* COLUNA 2: Foto */}
                   <div>
-                    <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Foto / Evidência</h4>
-                    <div 
-                      className={`border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden relative shadow-sm group transition-all ${viewingProof.proof.photo_url ? 'cursor-pointer hover:ring-2 hover:ring-blue-400' : ''}`}
+                    <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3 mt-4 print:mt-0">Foto / Evidência</h4>
+                    {/* ADICIONE A CLASSE 'print-photo-box' NA DIV ABAIXO */}
+                   <div 
+                      className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden relative shadow-sm print-photo-box cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
                       onClick={() => viewingProof.proof.photo_url && setZoomedImage(viewingProof.proof.photo_url)}
+                      title="Clique para ampliar"
                     >
                       {viewingProof.proof.photo_url ? (
-                        <>
-                          <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-all">
-                             <Maximize2 className="text-white opacity-0 group-hover:opacity-100 transform scale-75 group-hover:scale-100 transition-all drop-shadow-lg" size={32} />
-                          </div>
-                        </>
+                        <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover print:object-contain" />
                       ) : (
                         <span className="text-slate-400 italic text-sm">Sem foto</span>
                       )}
@@ -1017,8 +1011,20 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                 </div>
 
               </div>
-              <div className="bg-slate-50 dark:bg-slate-900 p-4 border-t dark:border-slate-700 flex justify-end">
-                <button onClick={() => setViewingProof(null)} className="px-6 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 font-medium">Fechar</button>
+
+              {/* Rodapé com Botões */}
+              <div className="bg-slate-50 dark:bg-slate-900 p-4 border-t dark:border-slate-700 flex justify-end gap-3 no-print">
+                {/* BOTÃO DE IMPRIMIR NOVO */}
+                <button 
+                    onClick={() => window.print()} 
+                    className="flex items-center gap-2 px-6 py-2 bg-slate-800 dark:bg-white text-white dark:text-slate-900 rounded-lg hover:bg-slate-700 transition-colors font-bold shadow-lg"
+                >
+                    <Printer size={18} /> Imprimir / PDF
+                </button>
+
+                <button onClick={() => setViewingProof(null)} className="px-6 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 font-medium">
+                    Fechar
+                </button>
               </div>
            </div>
         </div>
@@ -1213,7 +1219,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
            </div>
         </div>
       )}
-
+      {/* --- LIGHTBOX / ZOOM DA IMAGEM --- */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200 cursor-zoom-out"
+          onClick={() => setZoomedImage(null)} // Clica fora para fechar
+        >
+           {/* Botão X para fechar */}
+           <button 
+             onClick={() => setZoomedImage(null)}
+             className="absolute top-4 right-4 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-2 transition-colors"
+           >
+             <X size={32} />
+           </button>
+           
+           <img 
+             src={zoomedImage} 
+             alt="Zoom Evidência" 
+             className="max-w-full max-h-full object-contain rounded shadow-2xl pointer-events-none select-none"
+           />
+           
+           <p className="absolute bottom-4 text-white/50 text-sm">Toque em qualquer lugar para fechar</p>
+        </div>
+      )}
       {/* Lightbox / Zoom da Imagem */}
       {zoomedImage && (
         <div 
