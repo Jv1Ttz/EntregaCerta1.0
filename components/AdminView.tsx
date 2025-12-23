@@ -207,103 +207,113 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    
-    setTimeout(() => {
-      const reader = new FileReader();
-          reader.onload = async (e) => {
-            const text = e.target?.result as string;
-            try {
-              const parser = new DOMParser();
-              const xmlDoc = parser.parseFromString(text, "text/xml");
-              
-              // Função auxiliar para pegar valor de tag
-              const getValue = (tagName: string, context: Document | Element = xmlDoc) => 
-                context.getElementsByTagName(tagName)[0]?.textContent || "";
+ const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (files) {
+     // Adicionei ': any' para forçar o TypeScript a aceitar o arquivo
+      Array.from(files).forEach((file: any) => {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const text = e.target?.result as string;
+          try {
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(text, "text/xml");
+            
+            // Função auxiliar para pegar valor de tag
+            const getValue = (tagName: string, context: Document | Element = xmlDoc) => 
+              context.getElementsByTagName(tagName)[0]?.textContent || "";
 
-              const ide = xmlDoc.getElementsByTagName("ide")[0];
-              const dest = xmlDoc.getElementsByTagName("dest")[0];
-              const enderDest = dest?.getElementsByTagName("enderDest")[0];
-              const total = xmlDoc.getElementsByTagName("total")[0];
-              
-              // --- NOVO: Lendo Dados Adicionais ---
-              const infAdic = xmlDoc.getElementsByTagName("infAdic")[0];
-              const infCpl = getValue("infCpl", infAdic); // Informações Complementares
-              // ------------------------------------
+            const ide = xmlDoc.getElementsByTagName("ide")[0];
+            const dest = xmlDoc.getElementsByTagName("dest")[0];
+            const enderDest = dest?.getElementsByTagName("enderDest")[0];
+            const total = xmlDoc.getElementsByTagName("total")[0];
+            
+            // --- NOVA LÓGICA DE ENDEREÇO (O PULO DO GATO) 🐱 ---
+            const entregaTag = xmlDoc.getElementsByTagName("entrega")[0];
+            
+            // Se tiver a tag <entrega>, usamos ela como fonte do endereço.
+            // Se não, usamos o <enderDest> padrão do destinatário.
+            // Nota: Os nomes dos campos (xLgr, nro, CEP) são iguais nas duas tags.
+            const addressSource = entregaTag ? entregaTag : enderDest;
+            // ----------------------------------------------------
 
-              if (!dest || !enderDest) throw new Error("XML inválido: Destinatário não encontrado");
+            // --- Lendo Dados Adicionais (Mantemos isso!) ---
+            const infAdic = xmlDoc.getElementsByTagName("infAdic")[0];
+            const infCpl = getValue("infCpl", infAdic); 
 
-              const nNF = getValue("nNF", ide);
-              const serie = getValue("serie", ide);
-              const vNF = getValue("vNF", total);
-              const xNome = getValue("xNome", dest);
-              const CNPJ = getValue("CNPJ", dest);
-              const CPF = getValue("CPF", dest);
-              
-              // Endereço Padrão
-              const xLgr = getValue("xLgr", enderDest);
-              const nro = getValue("nro", enderDest);
-              const xCpl = getValue("xCpl", enderDest);
-              const xBairro = getValue("xBairro", enderDest);
-              const xMun = getValue("xMun", enderDest);
-              const UF = getValue("UF", enderDest);
-              const CEP = getValue("CEP", enderDest);
+            if (!dest || !addressSource) throw new Error("XML inválido: Endereço não encontrado");
 
-              // Monta o endereço base
-              let formattedAddress = `${xLgr}, ${nro}${xCpl ? ` (${xCpl})` : ''} - ${xBairro}, ${xMun} - ${UF}`;
+            const nNF = getValue("nNF", ide);
+            const serie = getValue("serie", ide);
+            const vNF = getValue("vNF", total);
+            const xNome = getValue("xNome", dest); // Nome do cliente sempre vem do Destinatário
+            const CNPJ = getValue("CNPJ", dest);
+            const CPF = getValue("CPF", dest);
+            
+            // Extraindo endereço da fonte escolhida (Entrega ou Destinatário)
+            const xLgr = getValue("xLgr", addressSource);
+            const nro = getValue("nro", addressSource);
+            const xCpl = getValue("xCpl", addressSource);
+            const xBairro = getValue("xBairro", addressSource);
+            const xMun = getValue("xMun", addressSource);
+            const UF = getValue("UF", addressSource);
+            const CEP = getValue("CEP", addressSource);
 
-              // --- LÓGICA DO GESTOR ---
-              // Se tiver dados adicionais, adicionamos com destaque ao endereço
-              if (infCpl && infCpl.trim().length > 0) {
-                 formattedAddress += ` || OBS/LOCAL: ${infCpl.toUpperCase()}`;
-              }
+            // Monta o endereço base
+            let formattedAddress = `${xLgr}, ${nro}${xCpl ? ` (${xCpl})` : ''} - ${xBairro}, ${xMun} - ${UF}`;
 
-              let chNFe = getValue("chNFe");
-              if (!chNFe) {
-                const infNFe = xmlDoc.getElementsByTagName("infNFe")[0];
-                const idAttr = infNFe?.getAttribute("Id");
-                if (idAttr && idAttr.startsWith("NFe")) chNFe = idAttr.substring(3);
-              }
+            // Adiciona Observações se houver (Aquela lógica que já fizemos)
+            if (infCpl && infCpl.trim().length > 0) {
+               formattedAddress += ` || OBS/LOCAL: ${infCpl.toUpperCase()}`;
+            }
 
-              if (!nNF || !xNome) throw new Error("XML incompleto.");
+            let chNFe = getValue("chNFe");
+            if (!chNFe) {
+              const infNFe = xmlDoc.getElementsByTagName("infNFe")[0];
+              const idAttr = infNFe?.getAttribute("Id");
+              if (idAttr && idAttr.startsWith("NFe")) chNFe = idAttr.substring(3);
+            }
 
-              const newInvoice: Invoice = {
-                id: `inv-${Date.now()}`,
-                access_key: chNFe || `GEN${Date.now()}`, 
-                number: nNF,
-                series: serie || '0',
-                customer_name: xNome,
-                customer_doc: CNPJ || CPF || 'Não informado',
-                customer_address: formattedAddress, // Agora inclui a observação
-                customer_zip: CEP,
-                value: parseFloat(vNF || "0"),
-                status: DeliveryStatus.PENDING,
-                driver_id: null,
-                vehicle_id: null,
-                created_at: new Date().toISOString(),
-              };
+            if (!nNF || !xNome) throw new Error("XML incompleto.");
 
-          const exists = invoices.some(i => i.access_key === newInvoice.access_key);
-          if (exists) {
-            alert(`A nota fiscal ${newInvoice.number} já existe.`);
-          } else {
-            await db.addInvoice(newInvoice);
-            refreshData();
-            alert(`Nota Fiscal ${nNF} importada com sucesso!`);
+            const newInvoice: Invoice = {
+              id: `inv-${Date.now()}-${Math.random()}`, // Adicionei random para evitar IDs duplicados rápidos
+              access_key: chNFe || `GEN${Date.now()}`, 
+              number: nNF,
+              series: serie || '0',
+              customer_name: xNome,
+              customer_doc: CNPJ || CPF || 'Não informado',
+              customer_address: formattedAddress, // Endereço inteligente
+              customer_zip: CEP,
+              value: parseFloat(vNF || "0"),
+              status: DeliveryStatus.PENDING,
+              driver_id: null,
+              vehicle_id: null,
+              created_at: new Date().toISOString(),
+            };
+
+            // Verifica duplicidade antes de salvar
+            const exists = invoices.some(i => i.access_key === newInvoice.access_key);
+            if (!exists) {
+                await db.addInvoice(newInvoice);
+            } else {
+                console.log(`Nota ${nNF} já existe.`);
+            }
+
+          } catch (error) {
+            console.error("Erro ao ler XML:", error);
+            alert("Erro ao ler um dos arquivos XML. Verifique o formato.");
           }
-        } catch (err) {
-          console.error(err);
-          alert("Erro ao processar XML.");
-        } finally {
-          setUploading(false);
-          event.target.value = '';
-        }
-      };
-      reader.readAsText(file);
-    }, 1000);
+        };
+        reader.readAsText(file);
+      });
+      
+      // Pequeno delay para atualizar a tela após processar vários arquivos
+      setTimeout(() => {
+          refreshData();
+          alert("Processamento concluído!");
+      }, 1000);
+    }
   };
 
   const handleLogisticsUpdate = async (invoiceId: string, field: 'driver' | 'vehicle', value: string) => {

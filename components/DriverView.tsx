@@ -5,6 +5,53 @@ import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, P
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
+
+  // --- COLE ISTO NO LUGAR DA FUNÇÃO getSmartGPSAddress ANTIGA ---
+
+const getSmartGPSAddress = (fullString: string, zip: string) => {
+    // 1. Tenta separar pelo nosso divisor padrão
+    // Usamos apenas "||" para garantir que pegamos a divisão mesmo se o espaço variar
+    const parts = fullString.split("||");
+    
+    let mainAddress = parts[0].trim();
+    
+    // Se não tiver divisão, manda o que tem
+    if (parts.length < 2) return `${mainAddress}, ${zip}`;
+
+    // Pega o conteúdo da observação (ignorando o rótulo OBS/LOCAL se tiver)
+    let obsContent = parts[1].replace("OBS/LOCAL:", "").trim();
+    const obsUpper = obsContent.toUpperCase();
+
+    // LISTA NEGRA: Se tiver QUALQUER uma dessas, é lixo de faturamento. Joga fora.
+    const garbageKeywords = [
+        "PEDIDO", "BOLETO", "NOTA", "NFE", "DANFE", "VENDEDOR", "REPRESENTANTE", 
+        "FATURAMENTO", "PAGAMENTO", "REF.", "CNPJ", "CPF", "MERCADORIA", "CONFERIR",
+        "HORARIO", "RECLAMACOES", "POSTERIORES", "CLIENTE"
+    ];
+
+    // LISTA BRANCA: Só aceitamos se tiver palavras CLARAS de endereço
+    const addressKeywords = [
+        "RUA ", "AV ", "AV.", "TRAVESSA", "ALAMEDA", "RODOVIA", "ESTRADA", 
+        "SITIO", "FAZENDA", "COND.", "CONDOMINIO", "EDIFICIO", "APTO", 
+        "PORTAO", "FUNDOS", "PROXIMO", "VIZINHO", "FRENTE"
+    ];
+
+    // Checagem de Segurança
+    const hasGarbage = garbageKeywords.some(badWord => obsUpper.includes(badWord));
+    const hasAddress = addressKeywords.some(goodWord => obsUpper.includes(goodWord));
+
+    // A LÓGICA BLINDADA:
+    // Só mandamos a observação se ela tiver cara de endereço E NÃO tiver cara de lixo.
+    // Se tiver "Pedido" no meio, a gente ignora, mesmo que tenha "Rua".
+    if (hasAddress && !hasGarbage) {
+       return `${mainAddress}, ${obsContent}, ${zip}`;
+    }
+
+    // Se caiu aqui, é porque é lixo ou não é endereço seguro. Manda só o principal.
+    return `${mainAddress}, ${zip}`;
+};
+
+
 interface DriverViewProps {
   driverId: string;
   onLogout: () => void;
@@ -130,13 +177,30 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   const handleFullRouteNavigation = (pendingInvoices: Invoice[]) => {
     if (pendingInvoices.length === 0) return;
-    const addresses = pendingInvoices.map(i => `${i.customer_address} ${i.customer_zip}`);
+
+    const addresses = pendingInvoices.map(i => {
+       // Usa a inteligência para montar o endereço
+       let addressToSend = getSmartGPSAddress(i.customer_address, i.customer_zip);
+
+       // Limpeza de segurança final (remove pipes que sobraram)
+       addressToSend = addressToSend.replace(/[|]/g, ' ');
+
+       return encodeURIComponent(addressToSend);
+    });
+
     const destination = addresses[addresses.length - 1];
     const waypoints = addresses.slice(0, addresses.length - 1).join('|');
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&waypoints=${encodeURIComponent(waypoints)}&travelmode=driving`;
+
+    let url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
+
+    if (waypoints.length > 0) {
+      url += `&waypoints=${waypoints}`;
+    }
+
     window.open(url, '_blank');
   };
 
+  
   if (selectedInvoice) {
     const vehicle = vehicles.find(v => v.id === selectedInvoice.vehicle_id);
     return (
@@ -328,14 +392,18 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   const [failureReason, setFailureReason] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleNavigation = (app: 'waze' | 'maps') => {
-    const fullAddress = `${invoice.customer_address} ${invoice.customer_zip}`;
-    const encodedAddress = encodeURIComponent(fullAddress);
+ const handleNavigation = (app: 'waze' | 'maps') => {
+    // Usa a mesma inteligência
+    let addressToSend = getSmartGPSAddress(invoice.customer_address, invoice.customer_zip);
+    
+    addressToSend = addressToSend.replace(/[|]/g, ' ');
+
+    const encodedAddress = encodeURIComponent(addressToSend);
 
     if (app === 'waze') {
       window.open(`https://waze.com/ul?q=${encodedAddress}&navigate=yes`, '_blank');
     } else {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}`, '_blank');
+      window.open(`https://www.google.com/maps/search/?api=1&query=${encodedAddress}`, '_blank');
     }
   };
 

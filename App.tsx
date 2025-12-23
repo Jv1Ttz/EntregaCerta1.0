@@ -3,7 +3,7 @@ import { db } from './services/db';
 import { ViewState } from './types';
 import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
-import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2 } from 'lucide-react';
+import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>({ type: 'ROLE_SELECT' });
@@ -20,6 +20,9 @@ const App: React.FC = () => {
   const [loginSelectedDriverId, setLoginSelectedDriverId] = useState<string | null>(null);
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  
+  // Controle de visibilidade da senha (usado tanto para Admin quanto Motorista)
+  const [showPassword, setShowPassword] = useState(false);
   
   // Admin Login State
   const [adminPassword, setAdminPassword] = useState('');
@@ -48,6 +51,7 @@ const App: React.FC = () => {
     setLoginSelectedDriverId(driverId);
     setLoginPassword('');
     setLoginError('');
+    setShowPassword(false); // Reseta a visibilidade ao abrir
   };
 
   const confirmDriverLogin = async () => {
@@ -95,13 +99,13 @@ const App: React.FC = () => {
               {/* Intro Text */}
               <div className="text-slate-900 dark:text-white space-y-6 flex flex-col justify-center">
                 <div>
-                   <h1 className="text-4xl md:text-6xl font-black tracking-tighter mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-emerald-500 dark:from-blue-400 dark:to-emerald-400">
-                     EntregaCerta
-                   </h1>
-                   <p className="text-slate-600 dark:text-slate-400 text-lg md:text-xl leading-relaxed">
-                     O sistema definitivo de canhoto digital para logística moderna. 
-                     Elimine papel, rastreie em tempo real e garanta validade jurídica.
-                   </p>
+                    <h1 className="text-4xl md:text-6xl font-black tracking-tighter mb-4 text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-emerald-500 dark:from-blue-400 dark:to-emerald-400">
+                      EntregaCerta
+                    </h1>
+                    <p className="text-slate-600 dark:text-slate-400 text-lg md:text-xl leading-relaxed">
+                      O sistema definitivo de canhoto digital para logística moderna. 
+                      Elimine papel, rastreie em tempo real e garanta validade jurídica.
+                    </p>
                 </div>
                 <div className="flex gap-4 text-sm font-mono text-slate-500 dark:text-slate-500">
                   <span>v1.2.0 Cloud</span>
@@ -126,7 +130,10 @@ const App: React.FC = () => {
                  </button>
 
                  <button 
-                    onClick={() => setView({ type: 'ADMIN_LOGIN' })}
+                    onClick={() => {
+                        setView({ type: 'ADMIN_LOGIN' });
+                        setShowPassword(false); // Reseta visualização ao entrar
+                    }}
                     className="w-full group bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all p-6 rounded-2xl flex items-center justify-between border border-slate-200 dark:border-slate-700 shadow-xl"
                  >
                     <div className="text-left">
@@ -146,7 +153,7 @@ const App: React.FC = () => {
       case 'ADMIN_LOGIN':
         return (
           <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center p-4 transition-colors duration-300">
-             <div className="bg-white dark:bg-slate-800 w-full max-w-sm p-8 rounded-2xl shadow-xl space-y-6 animate-in fade-in zoom-in duration-200 border border-slate-100 dark:border-slate-700">
+              <div className="bg-white dark:bg-slate-800 w-full max-w-sm p-8 rounded-2xl shadow-xl space-y-6 animate-in fade-in zoom-in duration-200 border border-slate-100 dark:border-slate-700">
                 <button onClick={() => {
                   setView({ type: 'ROLE_SELECT' });
                   setAdminLoginError('');
@@ -162,20 +169,31 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="space-y-4">
-                  <input 
-                     type="password" 
-                     autoFocus
-                     placeholder="Senha de Administrador" 
-                     className={`w-full text-center text-lg p-3 border rounded-lg outline-none focus:ring-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ${adminLoginError ? 'border-red-300 focus:ring-red-500 bg-red-50 dark:bg-red-900/10' : 'border-slate-300 dark:border-slate-600 focus:ring-slate-500'}`}
-                     value={adminPassword}
-                     onChange={e => {
-                       setAdminPassword(e.target.value);
-                       setAdminLoginError('');
-                     }}
-                     onKeyDown={e => {
-                       if (e.key === 'Enter') confirmAdminLogin();
-                     }}
-                   />
+                  {/* --- INPUT DE SENHA ADMIN COM OLHINHO --- */}
+                  <div className="relative w-full">
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        autoFocus
+                        placeholder="Senha de Administrador" 
+                        // Adicionei pr-12 para o texto não ficar por cima do ícone
+                        className={`w-full text-center text-lg p-3 pr-12 border rounded-lg outline-none focus:ring-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ${adminLoginError ? 'border-red-300 focus:ring-red-500 bg-red-50 dark:bg-red-900/10' : 'border-slate-300 dark:border-slate-600 focus:ring-slate-500'}`}
+                        value={adminPassword}
+                        onChange={e => {
+                          setAdminPassword(e.target.value);
+                          setAdminLoginError('');
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') confirmAdminLogin();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-2"
+                      >
+                        {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                      </button>
+                  </div>
                    
                    {adminLoginError && (
                      <div className="flex items-center justify-center gap-2 text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-2 rounded-md animate-in fade-in slide-in-from-top-1">
@@ -234,7 +252,7 @@ const App: React.FC = () => {
     }
   };
 
-  // Login Modal
+  // Login Modal (MOTORISTA)
   const loginModal = loginSelectedDriverId && (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in zoom-in duration-200">
        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-xs p-6 space-y-4 border border-slate-200 dark:border-slate-700">
@@ -244,20 +262,32 @@ const App: React.FC = () => {
             </div>
             <h3 className="font-bold text-slate-800 dark:text-white">Digite sua Senha</h3>
           </div>
-          <input 
-            type="password" 
-            autoFocus
-            placeholder="Senha..." 
-            className={`w-full text-center text-xl tracking-widest p-3 border rounded-lg outline-none focus:ring-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ${loginError ? 'border-red-300 focus:ring-red-500 bg-red-50 dark:bg-red-900/10' : 'border-slate-300 dark:border-slate-600 focus:ring-orange-500'}`}
-            value={loginPassword}
-            onChange={e => {
-              setLoginPassword(e.target.value);
-              setLoginError('');
-            }}
-            onKeyDown={e => {
-              if (e.key === 'Enter') confirmDriverLogin();
-            }}
-          />
+          
+          {/* --- INPUT DE SENHA MOTORISTA COM OLHINHO --- */}
+          <div className="relative w-full">
+              <input 
+                type={showPassword ? "text" : "password"} 
+                autoFocus
+                placeholder="Senha..." 
+                // Adicionei pr-12 aqui também
+                className={`w-full text-center text-xl tracking-widest p-3 pr-12 border rounded-lg outline-none focus:ring-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white ${loginError ? 'border-red-300 focus:ring-red-500 bg-red-50 dark:bg-red-900/10' : 'border-slate-300 dark:border-slate-600 focus:ring-orange-500'}`}
+                value={loginPassword}
+                onChange={e => {
+                  setLoginPassword(e.target.value);
+                  setLoginError('');
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') confirmDriverLogin();
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-2"
+              >
+                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+              </button>
+          </div>
 
           {loginError && (
             <div className="flex items-center justify-center gap-1 text-red-500 text-xs font-bold animate-in fade-in slide-in-from-top-1">
