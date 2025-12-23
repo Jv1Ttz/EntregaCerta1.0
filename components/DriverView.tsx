@@ -52,10 +52,14 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Estado da Rota
+  // --- NOVA LÓGICA DE ESTADO (Persistência Diária) ---
   const [routeStarted, setRouteStarted] = useState(() => {
     if (typeof window !== 'undefined') {
-        return localStorage.getItem(`route_started_${driverId}`) === 'true';
+        const savedDate = localStorage.getItem(`route_started_date_${driverId}`);
+        const today = new Date().toDateString(); // Ex: "Tue Dec 23 2025"
+        
+        // Se a data salva for igual a hoje, a rota está ativa!
+        return savedDate === today;
     }
     return false;
   });
@@ -113,8 +117,12 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const handleStartRoute = async () => {
     if(confirm("Confirmar saída para entrega? O gestor será notificado e o GPS ativado.")) {
         await db.startRoute(driverId);
+        
+        // --- SALVA A DATA DE HOJE ---
+        const today = new Date().toDateString();
+        localStorage.setItem(`route_started_date_${driverId}`, today);
+        
         setRouteStarted(true);
-        localStorage.setItem(`route_started_${driverId}`, 'true');
         refreshData();
         startTracking();
         requestWakeLock();
@@ -122,9 +130,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   };
 
   const handleLogoutWrapper = () => {
-      if(confirm("Deseja realmente sair? Isso encerrará a rota atual no dispositivo.")) {
-          localStorage.removeItem(`route_started_${driverId}`);
-          setRouteStarted(false);
+      // --- ALTERADO: Não apaga mais a rota ao sair ---
+      if(confirm("Deseja sair do sistema? \n(Sua rota continuará ativa se você voltar hoje).")) {
+          // NÃO REMOVEMOS O ITEM DO LOCALSTORAGE AQUI
           onLogout();
       }
   };
@@ -202,7 +210,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           setSelectedInvoice(null);
           refreshData();
         }}
-        // PASSAMOS O STATUS DA ROTA PARA O DETALHE
         routeStarted={routeStarted} 
       />
     );
@@ -253,6 +260,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
       <div className="p-4 space-y-6">
         
+        {/* SÓ APARECE SE NÃO INICIOU A ROTA HOJE */}
         {pendingInvoices.length > 0 && !routeStarted && (
         <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
@@ -295,7 +303,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
                 return (
                   <div 
                     key={inv.id}
-                    // AGORA O CLIQUE É LIVRE!
                     onClick={() => setSelectedInvoice(inv)}
                     className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border active:scale-95 transition-transform cursor-pointer relative ${isInProgress ? 'border-blue-300 dark:border-blue-700 shadow-blue-100 dark:shadow-none ring-1 ring-blue-100 dark:ring-blue-900' : 'border-gray-200 dark:border-slate-700'}`}
                   >
@@ -345,7 +352,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   );
 };
 
-// -- DELIVERY ACTION (Agora recebe routeStarted) --
+// -- DELIVERY ACTION --
 const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted }) => {
   const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'SUCCESS'>('DETAILS');
   const [frozenGeo, setFrozenGeo] = useState<{lat: number, lng: number} | null>(currentGeo);
@@ -385,7 +392,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   };
 
   const submitDelivery = async (success: boolean, reasonOverride?: string) => {
-    // --- TRAVA DE SEGURANÇA AQUI ---
+    // --- TRAVA DE SEGURANÇA: Se não iniciou rota hoje, não deixa baixar ---
     if (!routeStarted) {
         alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
         return;
