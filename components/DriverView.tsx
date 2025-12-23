@@ -1,56 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
-
-  // --- COLE ISTO NO LUGAR DA FUNÇÃO getSmartGPSAddress ANTIGA ---
-
+// --- FUNÇÃO DE LIMPEZA INTELIGENTE ---
 const getSmartGPSAddress = (fullString: string, zip: string) => {
-    // 1. Tenta separar pelo nosso divisor padrão
-    // Usamos apenas "||" para garantir que pegamos a divisão mesmo se o espaço variar
     const parts = fullString.split("||");
-    
     let mainAddress = parts[0].trim();
     
-    // Se não tiver divisão, manda o que tem
     if (parts.length < 2) return `${mainAddress}, ${zip}`;
 
-    // Pega o conteúdo da observação (ignorando o rótulo OBS/LOCAL se tiver)
     let obsContent = parts[1].replace("OBS/LOCAL:", "").trim();
     const obsUpper = obsContent.toUpperCase();
 
-    // LISTA NEGRA: Se tiver QUALQUER uma dessas, é lixo de faturamento. Joga fora.
     const garbageKeywords = [
         "PEDIDO", "BOLETO", "NOTA", "NFE", "DANFE", "VENDEDOR", "REPRESENTANTE", 
         "FATURAMENTO", "PAGAMENTO", "REF.", "CNPJ", "CPF", "MERCADORIA", "CONFERIR",
         "HORARIO", "RECLAMACOES", "POSTERIORES", "CLIENTE"
     ];
 
-    // LISTA BRANCA: Só aceitamos se tiver palavras CLARAS de endereço
     const addressKeywords = [
         "RUA ", "AV ", "AV.", "TRAVESSA", "ALAMEDA", "RODOVIA", "ESTRADA", 
         "SITIO", "FAZENDA", "COND.", "CONDOMINIO", "EDIFICIO", "APTO", 
         "PORTAO", "FUNDOS", "PROXIMO", "VIZINHO", "FRENTE"
     ];
 
-    // Checagem de Segurança
     const hasGarbage = garbageKeywords.some(badWord => obsUpper.includes(badWord));
     const hasAddress = addressKeywords.some(goodWord => obsUpper.includes(goodWord));
 
-    // A LÓGICA BLINDADA:
-    // Só mandamos a observação se ela tiver cara de endereço E NÃO tiver cara de lixo.
-    // Se tiver "Pedido" no meio, a gente ignora, mesmo que tenha "Rua".
     if (hasAddress && !hasGarbage) {
        return `${mainAddress}, ${obsContent}, ${zip}`;
     }
 
-    // Se caiu aqui, é porque é lixo ou não é endereço seguro. Manda só o principal.
     return `${mainAddress}, ${zip}`;
 };
-
+// -------------------------------------
 
 interface DriverViewProps {
   driverId: string;
@@ -66,20 +52,21 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   
-  // Tracking State (GPS "Vivo")
+  // Estado da Rota
+  const [routeStarted, setRouteStarted] = useState(() => {
+    if (typeof window !== 'undefined') {
+        return localStorage.getItem(`route_started_${driverId}`) === 'true';
+    }
+    return false;
+  });
+
   const [isTracking, setIsTracking] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
-
-  // Wake Lock Ref (Tela Sempre Ativa)
   const wakeLockRef = useRef<any>(null);
-
-  // Notification State
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  
   const watchIdRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
 
-  // Função para pedir que a tela não desligue
   const requestWakeLock = async () => {
     try {
       if ('wakeLock' in navigator) {
@@ -93,17 +80,19 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   useEffect(() => {
     refreshData();
-    startTracking();
-    requestWakeLock();
+    
+    if (routeStarted) {
+        startTracking();
+        requestWakeLock();
+    }
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && routeStarted) {
         requestWakeLock();
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Poll for notifications every 10 seconds
     notifIntervalRef.current = window.setInterval(async () => {
         const newNotifs = await db.consumeNotifications(driverId);
         if (newNotifs.length > 0) {
@@ -119,7 +108,26 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (wakeLockRef.current) wakeLockRef.current.release();
     };
-  }, [driverId]);
+  }, [driverId, routeStarted]);
+
+  const handleStartRoute = async () => {
+    if(confirm("Confirmar saída para entrega? O gestor será notificado e o GPS ativado.")) {
+        await db.startRoute(driverId);
+        setRouteStarted(true);
+        localStorage.setItem(`route_started_${driverId}`, 'true');
+        refreshData();
+        startTracking();
+        requestWakeLock();
+    }
+  };
+
+  const handleLogoutWrapper = () => {
+      if(confirm("Deseja realmente sair? Isso encerrará a rota atual no dispositivo.")) {
+          localStorage.removeItem(`route_started_${driverId}`);
+          setRouteStarted(false);
+          onLogout();
+      }
+  };
 
   const startTracking = () => {
     if ('geolocation' in navigator) {
@@ -128,7 +136,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           setIsTracking(true);
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
-          
           setCurrentLocation({ lat, lng });
           db.updateDriverLocation(driverId, lat, lng);
         },
@@ -136,11 +143,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           console.warn("GPS Tracking warning:", error.message);
           setIsTracking(false);
         },
-        {
-          enableHighAccuracy: true,
-          maximumAge: 10000,
-          timeout: 10000
-        }
+        { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
       );
     }
   };
@@ -160,7 +163,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
             db.getInvoicesByDriver(driverId),
             db.getVehicles()
         ]);
-        
         setDriver(allDrivers.find(d => d.id === driverId));
         setInvoices(driverInvoices);
         setVehicles(allVehicles);
@@ -177,30 +179,18 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   const handleFullRouteNavigation = (pendingInvoices: Invoice[]) => {
     if (pendingInvoices.length === 0) return;
-
     const addresses = pendingInvoices.map(i => {
-       // Usa a inteligência para montar o endereço
        let addressToSend = getSmartGPSAddress(i.customer_address, i.customer_zip);
-
-       // Limpeza de segurança final (remove pipes que sobraram)
        addressToSend = addressToSend.replace(/[|]/g, ' ');
-
        return encodeURIComponent(addressToSend);
     });
-
     const destination = addresses[addresses.length - 1];
     const waypoints = addresses.slice(0, addresses.length - 1).join('|');
-
     let url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`;
-
-    if (waypoints.length > 0) {
-      url += `&waypoints=${waypoints}`;
-    }
-
+    if (waypoints.length > 0) url += `&waypoints=${waypoints}`;
     window.open(url, '_blank');
   };
 
-  
   if (selectedInvoice) {
     const vehicle = vehicles.find(v => v.id === selectedInvoice.vehicle_id);
     return (
@@ -212,13 +202,14 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           setSelectedInvoice(null);
           refreshData();
         }}
+        // PASSAMOS O STATUS DA ROTA PARA O DETALHE
+        routeStarted={routeStarted} 
       />
     );
   }
 
   const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
   const historyInvoices = invoices.filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED);
-
   const currentVehicleId = pendingInvoices[0]?.vehicle_id;
   const currentVehicle = vehicles.find(v => v.id === currentVehicleId);
 
@@ -226,7 +217,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
     <div className="min-h-screen bg-gray-100 dark:bg-slate-900 pb-20 transition-colors duration-300">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
 
-      {/* Header */}
       <div className="bg-slate-900 dark:bg-black text-white p-6 rounded-b-3xl shadow-lg sticky top-0 z-10">
         <div className="flex justify-between items-start">
           <div>
@@ -237,24 +227,23 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
                 <Truck size={16} />
                 <span>{currentVehicle ? `${currentVehicle.plate}` : '...'}</span>
               </div>
-              {isTracking && (
-                <div className="flex items-center gap-1 text-green-400 animate-pulse">
-                  <Satellite size={14} />
-                  <span className="text-xs">GPS Ativo</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2">
+                  {routeStarted ? (
+                    isTracking ? (
+                        <div className="flex items-center gap-1 text-green-400 animate-pulse"><Satellite size={14} /><span className="text-xs">GPS Ativo</span></div>
+                    ) : (
+                        <div className="flex items-center gap-1 text-yellow-400"><Satellite size={14} /><span className="text-xs">Buscando GPS...</span></div>
+                    )
+                  ) : (
+                    <div className="flex items-center gap-1 text-red-400"><Lock size={14} /><span className="text-xs">Rota Bloqueada</span></div>
+                  )}
+              </div>
             </div>
           </div>
-          
           <div className="flex flex-col items-end gap-2">
-            <button onClick={onLogout} className="text-xs bg-slate-800 dark:bg-slate-800 border border-slate-700 dark:border-slate-600 px-3 py-1 rounded-full text-slate-200">Sair</button>
-            
-            {/* Botão de Tema */}
+            <button onClick={handleLogoutWrapper} className="text-xs bg-slate-800 dark:bg-slate-800 border border-slate-700 dark:border-slate-600 px-3 py-1 rounded-full text-slate-200">Sair</button>
             {toggleTheme && (
-              <button 
-                onClick={toggleTheme}
-                className="p-2 bg-slate-800/50 rounded-full text-slate-400 hover:text-yellow-400 transition-colors"
-              >
+              <button onClick={toggleTheme} className="p-2 bg-slate-800/50 rounded-full text-slate-400 hover:text-yellow-400 transition-colors">
                 {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
               </button>
             )}
@@ -264,20 +253,17 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
       <div className="p-4 space-y-6">
         
-        {/* Quick Actions - Apenas Iniciar Rota Agora */}
-        {pendingInvoices.some(i => i.status === 'PENDING') && (
-        <div className="grid grid-cols-1 gap-3">
+        {pendingInvoices.length > 0 && !routeStarted && (
+        <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
+                🔒 Inicie a rota para liberar a baixa das entregas.
+            </div>
             <button 
-              onClick={async () => {
-                if(confirm("Confirmar saída para entrega? O gestor será notificado.")) {
-                  await db.startRoute(driverId);
-                  refreshData();
-                }
-              }}
+              onClick={handleStartRoute}
               className="bg-green-600 dark:bg-green-700 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform animate-pulse"
             >
               <Navigation2 size={24} />
-              <span className="font-bold text-lg">Iniciar Rota</span>
+              <span className="font-bold text-lg">INICIAR ROTA</span>
             </button>
         </div>
         )}
@@ -289,19 +275,12 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
                Minha Rota ({pendingInvoices.length})
              </h2>
              <div className="flex gap-2">
-                <button 
-                    onClick={refreshData}
-                    className={`p-1.5 rounded-full border border-slate-200 dark:border-slate-600 ${refreshing ? 'bg-slate-100 dark:bg-slate-700 animate-spin' : 'bg-white dark:bg-slate-800'}`}
-                >
+                <button onClick={refreshData} className={`p-1.5 rounded-full border border-slate-200 dark:border-slate-600 ${refreshing ? 'bg-slate-100 dark:bg-slate-700 animate-spin' : 'bg-white dark:bg-slate-800'}`}>
                     <RefreshCw size={16} className="text-slate-600 dark:text-slate-300"/>
                 </button>
-                {pendingInvoices.length > 0 && (
-                <button 
-                    onClick={() => handleFullRouteNavigation(pendingInvoices)}
-                    className="flex items-center gap-1 text-blue-600 dark:text-blue-400 text-sm font-bold bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800 active:scale-95 transition-transform"
-                >
-                    <Compass size={16} />
-                    Mapa Completo
+                {pendingInvoices.length > 0 && routeStarted && (
+                <button onClick={() => handleFullRouteNavigation(pendingInvoices)} className="flex items-center gap-1 text-blue-600 dark:text-blue-400 text-sm font-bold bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800 active:scale-95 transition-transform">
+                    <Compass size={16} /> Mapa Completo
                 </button>
                 )}
              </div>
@@ -309,33 +288,27 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
           <div className="space-y-3">
             {pendingInvoices.length === 0 ? (
-              <div className="text-center py-10 text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
-                Sem entregas pendentes.
-              </div>
+              <div className="text-center py-10 text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">Sem entregas pendentes.</div>
             ) : (
               pendingInvoices.map((inv, index) => {
                 const isInProgress = inv.status === DeliveryStatus.IN_PROGRESS;
                 return (
                   <div 
                     key={inv.id}
+                    // AGORA O CLIQUE É LIVRE!
                     onClick={() => setSelectedInvoice(inv)}
                     className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border active:scale-95 transition-transform cursor-pointer relative ${isInProgress ? 'border-blue-300 dark:border-blue-700 shadow-blue-100 dark:shadow-none ring-1 ring-blue-100 dark:ring-blue-900' : 'border-gray-200 dark:border-slate-700'}`}
                   >
                     {isInProgress && (
-                       <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1">
-                         <Navigation2 size={10} /> EM ROTA
-                       </div>
+                       <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><Navigation2 size={10} /> EM ROTA</div>
                     )}
                     <div className={`absolute top-4 left-0 w-1 h-8 rounded-r-full ${isInProgress ? 'bg-blue-500' : 'bg-orange-400'}`}></div>
                     <div className="flex justify-between items-start mb-2 pl-2">
-                      <span className={`text-xs font-bold px-2 py-1 rounded-md ${isInProgress ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'}`}>
-                        Parada #{index + 1}
-                      </span>
+                      <span className={`text-xs font-bold px-2 py-1 rounded-md ${isInProgress ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'}`}>Parada #{index + 1}</span>
                       <span className="text-xs text-gray-400 dark:text-slate-500 font-mono">NF {inv.number}</span>
                     </div>
                     <h3 className="font-bold text-gray-900 dark:text-white text-lg leading-tight mb-1 pl-2">{inv.customer_name}</h3>
                     <p className="text-sm text-gray-500 dark:text-slate-400 line-clamp-2 pl-2">{inv.customer_address}</p>
-                    
                     <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between text-blue-600 dark:text-blue-400 font-medium text-sm pl-2">
                        <span className="flex items-center gap-1"><MapPin size={16}/> Ver Detalhes</span>
                        <Navigation size={16} />
@@ -372,11 +345,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   );
 };
 
-// -- Sub Component: Delivery Action Form --
-const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void }> = ({ invoice, vehicle, currentGeo, onBack }) => {
+// -- DELIVERY ACTION (Agora recebe routeStarted) --
+const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted }) => {
   const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'SUCCESS'>('DETAILS');
-  
-  // Congelamento de Localização
   const [frozenGeo, setFrozenGeo] = useState<{lat: number, lng: number} | null>(currentGeo);
 
   useEffect(() => {
@@ -392,12 +363,9 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   const [failureReason, setFailureReason] = useState('');
   const [loading, setLoading] = useState(false);
 
- const handleNavigation = (app: 'waze' | 'maps') => {
-    // Usa a mesma inteligência
+  const handleNavigation = (app: 'waze' | 'maps') => {
     let addressToSend = getSmartGPSAddress(invoice.customer_address, invoice.customer_zip);
-    
     addressToSend = addressToSend.replace(/[|]/g, ' ');
-
     const encodedAddress = encodeURIComponent(addressToSend);
 
     if (app === 'waze') {
@@ -417,6 +385,12 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   };
 
   const submitDelivery = async (success: boolean, reasonOverride?: string) => {
+    // --- TRAVA DE SEGURANÇA AQUI ---
+    if (!routeStarted) {
+        alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
+        return;
+    }
+
     const finalReason = reasonOverride || failureReason;
 
     if (success) {
@@ -479,7 +453,6 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
           <h2 className="font-bold text-lg text-gray-800 dark:text-white">Comprovante Digital</h2>
         </div>
         <div className="flex-1 p-4 space-y-6 overflow-y-auto">
-          {/* Indicador de Localização Congelada */}
           <div className={`p-3 rounded-lg flex items-center justify-center gap-2 text-xs font-bold ${frozenGeo ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800' : 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'}`}>
              <MapPin size={14} />
              {frozenGeo ? 
@@ -497,7 +470,6 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
           </div>
           <div className="space-y-2">
              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">2. Assinatura do Cliente</h3>
-             {/* Aumentei para h-80 (320px) para ficar grande no mobile */}
              <SignatureCanvas className="shadow-sm h-80 w-full bg-white rounded-lg border border-gray-300" onEnd={setSignature}/>
           </div>
           <div className="space-y-2">
@@ -554,7 +526,6 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                </div>
             </div>
             
-            {/* GRID DE AÇÕES ATUALIZADO (Sem botão WhatsApp e 2 colunas) */}
             <div className="grid grid-cols-2 gap-2">
               <button 
                 onClick={() => handleNavigation('waze')}
@@ -600,13 +571,31 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 flex gap-3 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
         <button onClick={() => {
+            // TRAVA NO BOTÃO DEVOLVER
+            if (!routeStarted) {
+                alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de devolver a mercadoria.");
+                return;
+            }
             const reason = prompt("Qual o motivo da devolução?");
             if(reason) { 
               submitDelivery(false, reason); 
             }
           }}
-          className="flex-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-bold py-4 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Devolver</button>
-        <button onClick={() => setStep('PROOF')} className="flex-[2] bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 active:scale-95 transition-all">Realizar Baixa</button>
+          className={`flex-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-bold py-4 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors ${!routeStarted ? 'opacity-50 cursor-not-allowed' : ''}`}>Devolver</button>
+        
+        <button 
+          // TRAVA NO BOTÃO REALIZAR BAIXA
+          onClick={() => {
+              if (!routeStarted) {
+                  alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
+                  return;
+              }
+              setStep('PROOF');
+          }} 
+          className={`flex-[2] bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-blue-200 dark:shadow-none hover:bg-blue-700 active:scale-95 transition-all ${!routeStarted ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            Realizar Baixa
+            {!routeStarted && <Lock size={16} className="inline ml-2" />}
+        </button>
       </div>
     </div>
   );
