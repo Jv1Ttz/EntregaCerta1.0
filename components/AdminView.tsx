@@ -667,7 +667,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                        <div>
                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200 leading-none">{driver.name}</p>
                          <p className="text-[10px] text-slate-400">
-                           {driver.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} acumulados
+                           {driver.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} acumulados por entrega
                          </p>
                        </div>
                      </div>

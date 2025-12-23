@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, MessageSquare, Sun, Moon } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
@@ -23,15 +23,38 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [isTracking, setIsTracking] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
+  // Wake Lock Ref (Tela Sempre Ativa)
+  const wakeLockRef = useRef<any>(null);
+
   // Notification State
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   
   const watchIdRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
 
+  // Função para pedir que a tela não desligue
+  const requestWakeLock = async () => {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        console.log('Tela mantida ativa (Wake Lock ativo)');
+      }
+    } catch (err) {
+      console.error(`Erro ao ativar Wake Lock: ${err}`);
+    }
+  };
+
   useEffect(() => {
     refreshData();
     startTracking();
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Poll for notifications every 10 seconds
     notifIntervalRef.current = window.setInterval(async () => {
@@ -46,6 +69,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
     return () => {
         stopTracking();
         if (notifIntervalRef.current) clearInterval(notifIntervalRef.current);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        if (wakeLockRef.current) wakeLockRef.current.release();
     };
   }, [driverId]);
 
@@ -57,10 +82,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
           
-          // Atualiza a localização "viva"
           setCurrentLocation({ lat, lng });
-
-          // Atualiza no banco (Debounce idealmente seria aplicado aqui)
           db.updateDriverLocation(driverId, lat, lng);
         },
         (error) => {
@@ -68,7 +90,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           setIsTracking(false);
         },
         {
-          enableHighAccuracy: true, // Força maior precisão
+          enableHighAccuracy: true,
           maximumAge: 10000,
           timeout: 10000
         }
@@ -121,7 +143,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
       <DeliveryAction 
         invoice={selectedInvoice} 
         vehicle={vehicle}
-        currentGeo={currentLocation} // Passa a localização atual para ser congelada lá dentro
+        currentGeo={currentLocation}
         onBack={() => {
           setSelectedInvoice(null);
           refreshData();
@@ -287,22 +309,17 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 };
 
 // -- Sub Component: Delivery Action Form --
-// Alterado para CONGELAR a localização assim que abre
 const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void }> = ({ invoice, vehicle, currentGeo, onBack }) => {
   const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'SUCCESS'>('DETAILS');
   
-  // -- Lógica de Congelamento de Localização --
-  // Usamos um estado local para salvar a coordenada no momento que a tela carrega
+  // Congelamento de Localização
   const [frozenGeo, setFrozenGeo] = useState<{lat: number, lng: number} | null>(currentGeo);
 
   useEffect(() => {
-    // Se entrou na tela e não tinha GPS, mas o GPS chegou depois de 1 segundo, atualiza.
-    // Mas se já tiver (frozenGeo), mantém o original (congela).
     if (!frozenGeo && currentGeo) {
       setFrozenGeo(currentGeo);
     }
   }, [currentGeo, frozenGeo]);
-  // ------------------------------------------
 
   const [receiverName, setReceiverName] = useState('');
   const [receiverDoc, setReceiverDoc] = useState('');
@@ -359,7 +376,6 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         receiver_doc: success ? receiverDoc : 'N/A',
         signature_data: success ? signature : '',
         photo_url: success ? photo : '',
-        // AQUI ESTÁ O TRUQUE: Usamos o frozenGeo, que é a localização de quando ele abriu a tela
         geo_lat: frozenGeo?.lat || null,
         geo_long: frozenGeo?.lng || null,
         delivered_at: new Date().toISOString(),
@@ -470,7 +486,8 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                </div>
             </div>
             
-            <div className="grid grid-cols-3 gap-2">
+            {/* GRID DE AÇÕES ATUALIZADO (Sem botão WhatsApp e 2 colunas) */}
+            <div className="grid grid-cols-2 gap-2">
               <button 
                 onClick={() => handleNavigation('waze')}
                 className="flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
@@ -482,16 +499,6 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                 className="flex flex-col items-center justify-center p-4 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
               >
                 <Map className="mb-2" /> <span className="text-[10px] font-bold">Maps</span>
-              </button>
-              <button 
-                onClick={() => {
-                  const msg = `Olá ${invoice.customer_name}! Sou o motorista da EntregaCerta e estou a caminho com sua entrega (NF ${invoice.number}). Por favor, aguarde no local.`;
-                  const url = `https://wa.me/?text=${encodeURIComponent(msg)}`;
-                  window.open(url, '_blank');
-                }}
-                className="flex flex-col items-center justify-center p-4 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-xl hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors"
-              >
-                <MessageSquare className="mb-2" /> <span className="text-[10px] font-bold">Avisar</span>
               </button>
             </div>
 
