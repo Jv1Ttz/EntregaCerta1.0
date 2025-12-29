@@ -45,6 +45,9 @@ export interface DeliveryProof {
   receiver_doc: string;
   signature_data: string; // Base64
   photo_url: string; // Base64 for demo
+  photo_stub_url?: string;
+  return_type?: 'TOTAL' | 'PARTIAL';
+  return_items?: string;
   geo_lat: number | null;
   geo_long: number | null;
   delivered_at: string;

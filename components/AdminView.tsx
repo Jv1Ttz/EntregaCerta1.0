@@ -495,6 +495,112 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
+  // --- FUNÇÃO DE IMPRESSÃO EM NOVA JANELA (SEM BUGS) ---
+  const handlePrintProof = () => {
+    if (!viewingProof) return;
+
+    // Abre uma janela em branco
+    const printWindow = window.open('', '_blank', 'width=900,height=800');
+    if (!printWindow) return alert("Por favor, permita pop-ups para imprimir.");
+
+    const { invoice, proof } = viewingProof;
+
+    // Cria o HTML limpo para impressão
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Comprovante - EntregaCerta</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 40px; color: #333; max-width: 800px; margin: 0 auto; }
+          .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 20px; margin-bottom: 30px; }
+          .header h1 { margin: 0; font-size: 24px; text-transform: uppercase; }
+          .header p { margin: 5px 0 0; color: #666; font-size: 14px; }
+          
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
+          .section-title { font-size: 12px; font-weight: bold; color: #888; text-transform: uppercase; border-bottom: 1px solid #eee; margin-bottom: 10px; padding-bottom: 5px; }
+          .field { margin-bottom: 12px; }
+          .label { font-size: 11px; color: #999; display: block; margin-bottom: 2px; }
+          .value { font-size: 16px; font-weight: 500; display: block; }
+          
+          /* Estilo das Fotos */
+          .evidence-box { 
+            margin-top: 30px; 
+            border: 1px solid #eee; 
+            border-radius: 8px; 
+            padding: 10px;
+            page-break-inside: avoid; /* Evita cortar a foto ao meio */
+          }
+          .evidence-title { font-weight: bold; margin-bottom: 10px; display: block; text-align: center; background: #f9f9f9; padding: 5px; border-radius: 4px;}
+          .evidence-img { 
+            width: 100%; 
+            height: 350px; /* Altura fixa para não estourar a folha */
+            object-fit: contain; 
+            display: block; 
+            margin: 0 auto; 
+          }
+          
+          .footer { margin-top: 50px; text-align: center; font-size: 10px; color: #ccc; border-top: 1px solid #eee; padding-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Comprovante de Entrega Digital</h1>
+          <p>NF-e ${invoice.number} • Série ${invoice.series}</p>
+          <p>Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+        </div>
+
+        <div class="grid">
+          <div>
+            <div class="section-title">Dados do Recebedor</div>
+            <div class="field"><span class="label">Nome</span><span class="value">${proof.receiver_name}</span></div>
+            <div class="field"><span class="label">Documento</span><span class="value">${proof.receiver_doc}</span></div>
+          </div>
+          <div>
+            <div class="section-title">Operação</div>
+            <div class="field"><span class="label">Data da Baixa</span><span class="value">${new Date(proof.delivered_at).toLocaleString('pt-BR')}</span></div>
+            <div class="field"><span class="label">GPS</span><span class="value">${proof.geo_lat ? `${proof.geo_lat}, ${proof.geo_long}` : 'Não capturado'}</span></div>
+          </div>
+        </div>
+
+        <div class="evidence-box">
+          <span class="evidence-title">1. Assinatura Digital</span>
+          ${proof.signature_data 
+            ? `<img src="${proof.signature_data}" class="evidence-img" style="height: 150px;" />` 
+            : '<p style="text-align:center; padding: 50px; color:#999">Não assinada</p>'
+          }
+        </div>
+
+        <div class="evidence-box">
+          <span class="evidence-title">2. Foto do Local / Mercadoria</span>
+          ${proof.photo_url 
+            ? `<img src="${proof.photo_url}" class="evidence-img" />` 
+            : '<p style="text-align:center; padding: 50px; color:#999">Sem foto</p>'
+          }
+        </div>
+
+        ${(proof as any).photo_stub_url ? `
+        <div class="evidence-box">
+          <span class="evidence-title">3. Foto do Canhoto Físico</span>
+          <img src="${(proof as any).photo_stub_url}" class="evidence-img" />
+        </div>` : ''}
+
+        <div class="footer">
+          Sistema EntregaCerta v1.0 • Autenticação Digital
+        </div>
+
+        <script>
+          // Manda imprimir assim que carregar as imagens
+          window.onload = () => { setTimeout(() => window.print(), 500); }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   const getStatusBadge = (status: DeliveryStatus) => {
     const styles = {
       [DeliveryStatus.PENDING]: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800',
@@ -917,12 +1023,35 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
               <div className="overflow-y-auto p-6 space-y-6">
                 
                 {/* Status Banner */}
+                {/* STATUS BANNER (ATUALIZADO PARA SUPORTAR PARCIAL/TOTAL) */}
                 {viewingProof.proof.failure_reason && (
-                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-4 rounded-lg flex items-start gap-3 text-red-800 dark:text-red-300">
+                  <div className={`border p-4 rounded-lg flex items-start gap-3 ${viewingProof.proof.return_type === 'PARTIAL' ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-300' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'}`}>
+                    
                     <AlertTriangle className="shrink-0 mt-0.5" />
-                    <div>
-                      <span className="font-bold block">Entrega Não Realizada</span>
-                      Motivo: {viewingProof.proof.failure_reason}
+                    
+                    <div className="w-full">
+                      <div className="flex justify-between items-start">
+                        <span className="font-bold text-lg block mb-1">
+                            {viewingProof.proof.return_type === 'PARTIAL' ? 'Devolução Parcial' : 'Devolução Total'}
+                        </span>
+                        {/* Badge do Tipo */}
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${viewingProof.proof.return_type === 'PARTIAL' ? 'bg-orange-100 border-orange-300 text-orange-700' : 'bg-red-100 border-red-300 text-red-700'}`}>
+                            {viewingProof.proof.return_type || 'FALHA'}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 text-sm bg-white/50 dark:bg-black/20 p-3 rounded">
+                        <strong className="block text-xs opacity-70 uppercase mb-1">Motivo:</strong>
+                        {viewingProof.proof.failure_reason}
+                      </div>
+
+                      {/* MOSTRA ITENS SE FOR PARCIAL */}
+                      {viewingProof.proof.return_type === 'PARTIAL' && viewingProof.proof.return_items && (
+                          <div className="mt-2 text-sm bg-white/50 dark:bg-black/20 p-3 rounded border-l-4 border-orange-400">
+                            <strong className="block text-xs opacity-70 uppercase mb-1">Itens Retornados:</strong>
+                            <pre className="whitespace-pre-wrap font-sans">{viewingProof.proof.return_items}</pre>
+                          </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -986,13 +1115,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
                 {/* Evidence Images */}
                 {/* ADICIONE A CLASSE 'print-evidence-grid' NA DIV ABAIXO */}
-                <div className="grid md:grid-cols-2 gap-6 pt-4 border-t dark:border-slate-700 print-evidence-grid">
+                {/* Evidence Images (ATUALIZADO PARA 3 COLUNAS) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t dark:border-slate-700">
                   
                   {/* COLUNA 1: Assinatura */}
                   <div>
                     <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Assinatura Digital</h4>
-                    {/* ADICIONE A CLASSE 'print-signature-box' NA DIV ABAIXO */}
-                    <div className="border border-slate-200 dark:border-slate-600 rounded-lg bg-white p-2 h-40 flex items-center justify-center shadow-sm relative group print-signature-box">
+                    <div className="border border-slate-200 dark:border-slate-600 rounded-lg bg-white p-2 h-40 flex items-center justify-center shadow-sm relative group">
                       {viewingProof.proof.signature_data ? (
                         <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" />
                       ) : (
@@ -1001,19 +1130,35 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                     </div>
                   </div>
 
-                  {/* COLUNA 2: Foto */}
+                  {/* COLUNA 2: Foto do Local */}
                   <div>
-                    <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3 mt-4 print:mt-0">Foto / Evidência</h4>
-                    {/* ADICIONE A CLASSE 'print-photo-box' NA DIV ABAIXO */}
+                    <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Foto / Evidência</h4>
                    <div 
-                      className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden relative shadow-sm print-photo-box cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                      className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden relative shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
                       onClick={() => viewingProof.proof.photo_url && setZoomedImage(viewingProof.proof.photo_url)}
                       title="Clique para ampliar"
                     >
                       {viewingProof.proof.photo_url ? (
-                        <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover print:object-contain" />
+                        <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" />
                       ) : (
                         <span className="text-slate-400 italic text-sm">Sem foto</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* COLUNA 3: Canhoto Físico (NOVO BLOCO) 📸 */}
+                  <div>
+                    <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Canhoto Físico</h4>
+                   <div 
+                      className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden relative shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                      // Aqui usamos o "as any" ou a verificação opcional para evitar erro de TypeScript se ele reclamar
+                      onClick={() => viewingProof.proof.photo_stub_url && setZoomedImage(viewingProof.proof.photo_stub_url)}
+                      title="Clique para ampliar"
+                    >
+                      {viewingProof.proof.photo_stub_url ? (
+                        <img src={viewingProof.proof.photo_stub_url} alt="Canhoto" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-slate-400 italic text-sm">Não anexado</span>
                       )}
                     </div>
                   </div>
@@ -1026,7 +1171,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
               <div className="bg-slate-50 dark:bg-slate-900 p-4 border-t dark:border-slate-700 flex justify-end gap-3 no-print">
                 {/* BOTÃO DE IMPRIMIR NOVO */}
                 <button 
-                    onClick={() => window.print()} 
+                    onClick={handlePrintProof}
                     className="flex items-center gap-2 px-6 py-2 bg-slate-800 dark:bg-white text-white dark:text-slate-900 rounded-lg hover:bg-slate-700 transition-colors font-bold shadow-lg"
                 >
                     <Printer size={18} /> Imprimir / PDF

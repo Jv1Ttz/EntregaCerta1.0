@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
@@ -36,7 +36,43 @@ const getSmartGPSAddress = (fullString: string, zip: string) => {
 
     return `${mainAddress}, ${zip}`;
 };
+
+// --- FUNÇÃO PARA COMPRIMIR FOTOS (Economiza dados e espaço) ---
+const compressImage = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const scale = 800 / img.width; // Redimensiona para max 800px de largura
+        canvas.width = 800;
+        canvas.height = img.height * scale;
+        
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Comprime para JPEG qualidade 70%
+        resolve(canvas.toDataURL('image/jpeg', 0.7)); 
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 // -------------------------------------
+
+// TIPO PARA O SISTEMA DE MODAL (Opcional, mantido para compatibilidade futura)
+type ModalConfig = {
+    isOpen: boolean;
+    type: 'ALERT' | 'CONFIRM' | 'INPUT';
+    title: string;
+    message: string;
+    onConfirm: (inputValue?: string) => void;
+};
 
 interface DriverViewProps {
   driverId: string;
@@ -52,13 +88,11 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   
-  // --- NOVA LÓGICA DE ESTADO (Persistência Diária) ---
+  // --- LÓGICA DE ESTADO (Persistência Diária) ---
   const [routeStarted, setRouteStarted] = useState(() => {
     if (typeof window !== 'undefined') {
         const savedDate = localStorage.getItem(`route_started_date_${driverId}`);
-        const today = new Date().toDateString(); // Ex: "Tue Dec 23 2025"
-        
-        // Se a data salva for igual a hoje, a rota está ativa!
+        const today = new Date().toDateString();
         return savedDate === today;
     }
     return false;
@@ -71,14 +105,15 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const watchIdRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
 
+  // Wake Lock (Tela Ativa)
   const requestWakeLock = async () => {
     try {
       if ('wakeLock' in navigator) {
         wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
-        console.log('Tela mantida ativa (Wake Lock ativo)');
+        console.log('Tela mantida ativa');
       }
     } catch (err) {
-      console.error(`Erro ao ativar Wake Lock: ${err}`);
+      console.error(`Erro Wake Lock: ${err}`);
     }
   };
 
@@ -117,11 +152,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const handleStartRoute = async () => {
     if(confirm("Confirmar saída para entrega? O gestor será notificado e o GPS ativado.")) {
         await db.startRoute(driverId);
-        
-        // --- SALVA A DATA DE HOJE ---
         const today = new Date().toDateString();
         localStorage.setItem(`route_started_date_${driverId}`, today);
-        
         setRouteStarted(true);
         refreshData();
         startTracking();
@@ -130,9 +162,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   };
 
   const handleLogoutWrapper = () => {
-      // --- ALTERADO: Não apaga mais a rota ao sair ---
       if(confirm("Deseja sair do sistema? \n(Sua rota continuará ativa se você voltar hoje).")) {
-          // NÃO REMOVEMOS O ITEM DO LOCALSTORAGE AQUI
           onLogout();
       }
   };
@@ -148,7 +178,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           db.updateDriverLocation(driverId, lat, lng);
         },
         (error) => {
-          console.warn("GPS Tracking warning:", error.message);
+          console.warn("GPS Warning:", error.message);
           setIsTracking(false);
         },
         { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
@@ -259,8 +289,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
       </div>
 
       <div className="p-4 space-y-6">
-        
-        {/* SÓ APARECE SE NÃO INICIOU A ROTA HOJE */}
         {pendingInvoices.length > 0 && !routeStarted && (
         <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
@@ -354,21 +382,30 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
 // -- DELIVERY ACTION --
 const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted }) => {
-  const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'SUCCESS'>('DETAILS');
+  // Estados de Controle
+  const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'RETURN' | 'SUCCESS'>('DETAILS');
+  const [loading, setLoading] = useState(false);
   const [frozenGeo, setFrozenGeo] = useState<{lat: number, lng: number} | null>(currentGeo);
+
+  // Estados de Formulário
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverDoc, setReceiverDoc] = useState('');
+  const [signature, setSignature] = useState('');
+  
+  // Estados de Fotos
+  const [photo, setPhoto] = useState<string>('');
+  const [photoStub, setPhotoStub] = useState<string>(''); // FOTO CANHOTO (Corrigido)
+
+  // Estados de Devolução
+  const [failureReason, setFailureReason] = useState('');
+  const [returnType, setReturnType] = useState<'TOTAL' | 'PARTIAL'>('TOTAL');
+  const [returnItems, setReturnItems] = useState('');
 
   useEffect(() => {
     if (!frozenGeo && currentGeo) {
       setFrozenGeo(currentGeo);
     }
   }, [currentGeo, frozenGeo]);
-
-  const [receiverName, setReceiverName] = useState('');
-  const [receiverDoc, setReceiverDoc] = useState('');
-  const [signature, setSignature] = useState('');
-  const [photo, setPhoto] = useState<string>('');
-  const [failureReason, setFailureReason] = useState('');
-  const [loading, setLoading] = useState(false);
 
   const handleNavigation = (app: 'waze' | 'maps') => {
     let addressToSend = getSmartGPSAddress(invoice.customer_address, invoice.customer_zip);
@@ -382,23 +419,34 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
     }
   };
 
-  const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Nova função de captura de foto (com compressão e tipos)
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>, type: 'proof' | 'stub') => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setPhoto(ev.target?.result as string);
-      reader.readAsDataURL(file);
+      try {
+        setLoading(true);
+        const compressedBase64 = await compressImage(file);
+        
+        if (type === 'proof') {
+            setPhoto(compressedBase64);
+        } else {
+            setPhotoStub(compressedBase64);
+        }
+      } catch (err) {
+        alert("Erro ao processar imagem. Tente novamente.");
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
   const submitDelivery = async (success: boolean, reasonOverride?: string) => {
-    // --- TRAVA DE SEGURANÇA: Se não iniciou rota hoje, não deixa baixar ---
+    // Validações
     if (!routeStarted) {
-        alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
+        alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS.");
         return;
     }
-
-    const finalReason = reasonOverride || failureReason;
 
     if (success) {
       if (!signature && !photo) {
@@ -410,10 +458,9 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
          return;
       }
     } else {
-      if (!finalReason) {
-        alert("Informe o motivo da devolução.");
-        return;
-      }
+      // Validação de Devolução
+      if (!failureReason) return alert("Informe o motivo da devolução.");
+      if (returnType === 'PARTIAL' && !returnItems) return alert("Informe quais itens retornaram.");
     }
 
     setLoading(true);
@@ -425,21 +472,30 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         receiver_doc: success ? receiverDoc : 'N/A',
         signature_data: success ? signature : '',
         photo_url: success ? photo : '',
+        photo_stub_url: success ? photoStub : '', // Envia o canhoto
+
+        // --- DADOS DE DEVOLUÇÃO ---
+        return_type: success ? undefined : returnType,
+        return_items: success ? undefined : returnItems,
+        failure_reason: success ? undefined : failureReason,
+        // -------------------------
+
         geo_lat: frozenGeo?.lat || null,
         geo_long: frozenGeo?.lng || null,
         delivered_at: new Date().toISOString(),
-        failure_reason: success ? undefined : finalReason
       };
 
       await db.saveProof(proof);
       setStep('SUCCESS');
     } catch (e) {
-      alert("Erro ao salvar entrega. Tente novamente.");
+      alert("Erro ao salvar. Tente novamente.");
       console.error(e);
     } finally {
       setLoading(false);
     }
   };
+
+  // --- TELAS DO MODAL ---
 
   if (step === 'SUCCESS') {
     return (
@@ -452,6 +508,63 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
     );
   }
 
+  // --- TELA DE DEVOLUÇÃO (NOVA) ---
+  if (step === 'RETURN') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex flex-col transition-colors duration-300">
+        <div className="bg-white dark:bg-slate-800 p-4 shadow-sm border-b dark:border-slate-700 flex items-center gap-2 sticky top-0 z-10">
+          <button onClick={() => setStep('DETAILS')} className="p-2 -ml-2 text-gray-600 dark:text-slate-300"><ChevronLeft /></button>
+          <h2 className="font-bold text-lg text-gray-800 dark:text-white">Registrar Devolução</h2>
+        </div>
+
+        <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+           <div className="space-y-3">
+             <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">O que aconteceu?</label>
+             <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => setReturnType('TOTAL')} className={`p-4 rounded-xl border-2 font-bold transition-all text-left ${returnType === 'TOTAL' ? 'border-red-500 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 ring-2 ring-red-200 dark:ring-red-900' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500 opacity-60'}`}>
+                  <span className="block text-lg mb-1">Total</span>
+                  <span className="text-xs font-normal">Cliente recusou tudo ou local fechado.</span>
+                </button>
+                <button onClick={() => setReturnType('PARTIAL')} className={`p-4 rounded-xl border-2 font-bold transition-all text-left ${returnType === 'PARTIAL' ? 'border-orange-500 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 ring-2 ring-orange-200 dark:ring-orange-900' : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-500 opacity-60'}`}>
+                  <span className="block text-lg mb-1">Parcial</span>
+                  <span className="text-xs font-normal">Avaria, falta ou recusa de itens específicos.</span>
+                </button>
+             </div>
+           </div>
+
+           <div className="space-y-2">
+              <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">Motivo / Observação</label>
+              <textarea 
+                placeholder={returnType === 'TOTAL' ? "Ex: Estabelecimento fechado, cliente ausente..." : "Ex: Caixa rasgada, produto vencido..."}
+                className="w-full p-4 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-blue-500 outline-none h-32 resize-none"
+                value={failureReason}
+                onChange={e => setFailureReason(e.target.value)}
+              />
+           </div>
+
+           {returnType === 'PARTIAL' && (
+             <div className="space-y-2 animate-in slide-in-from-top-4 fade-in">
+                <label className="text-sm font-bold text-orange-600 dark:text-orange-400 uppercase flex items-center gap-2"><Package size={16} /> Quais itens voltaram?</label>
+                <textarea 
+                  placeholder="Liste os produtos e quantidades..."
+                  className="w-full p-4 rounded-lg border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/10 text-slate-900 dark:text-white focus:border-orange-500 outline-none h-32 resize-none"
+                  value={returnItems}
+                  onChange={e => setReturnItems(e.target.value)}
+                />
+             </div>
+           )}
+        </div>
+
+        <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0">
+          <button onClick={() => submitDelivery(false)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform">
+            Confirmar Devolução {returnType === 'TOTAL' ? 'Total' : 'Parcial'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- TELA DE BAIXA (PROOF) ---
   if (step === 'PROOF') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex flex-col transition-colors duration-300">
@@ -479,6 +592,8 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">2. Assinatura do Cliente</h3>
              <SignatureCanvas className="shadow-sm h-80 w-full bg-white rounded-lg border border-gray-300" onEnd={setSignature}/>
           </div>
+          
+          {/* FOTO 1: LOCAL / MERCADORIA */}
           <div className="space-y-2">
              <h3 className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide">3. Foto do Local/Produto</h3>
              <label className="block w-full">
@@ -494,10 +609,37 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                       <span className="text-gray-500 dark:text-slate-400 text-sm font-medium">Tirar Foto</span>
                     </>
                   )}
-                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCapture} />
+                  {/* CORREÇÃO: Chama passando o tipo 'proof' */}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handlePhotoCapture(e, 'proof')} />
                 </div>
              </label>
           </div>
+
+          {/* FOTO 2: CANHOTO (NOVO) */}
+          <div className="space-y-2">
+             <h3 className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wide flex justify-between">
+                <span>4. Foto do Canhoto (Opcional)</span>
+                {photoStub && <span className="text-green-500 text-xs">OK</span>}
+             </h3>
+             <label className="block w-full">
+                <div className={`border-2 border-dashed rounded-lg h-24 flex flex-col items-center justify-center cursor-pointer transition-colors ${photoStub ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : 'border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-blue-400'}`}>
+                  {photoStub ? (
+                    <div className="relative w-full h-full p-2">
+                      <img src={photoStub} className="w-full h-full object-contain rounded" alt="Stub" />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/20 text-white font-bold text-xs">Alterar</div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <FileText className="text-gray-400 dark:text-slate-500" />
+                      <span className="text-gray-500 dark:text-slate-400 text-sm font-medium">Fotografar Canhoto</span>
+                    </div>
+                  )}
+                  {/* CORREÇÃO: Chama passando o tipo 'stub' */}
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handlePhotoCapture(e, 'stub')} />
+                </div>
+             </label>
+          </div>
+
         </div>
         <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0 space-y-3">
           <button onClick={() => submitDelivery(true)} disabled={loading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform disabled:opacity-50 disabled:scale-100">
@@ -508,6 +650,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
     );
   }
 
+  // --- TELA INICIAL (DETAILS) ---
   return (
     <div className="min-h-screen bg-white dark:bg-slate-900 flex flex-col transition-colors duration-300">
       <div className="bg-slate-900 dark:bg-black text-white p-6 pb-12 rounded-b-[2.5rem] shadow-lg relative">
@@ -578,20 +721,17 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
 
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 flex gap-3 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
         <button onClick={() => {
-            // TRAVA NO BOTÃO DEVOLVER
+            // LÓGICA DE DEVOLUÇÃO ATUALIZADA
             if (!routeStarted) {
                 alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de devolver a mercadoria.");
                 return;
             }
-            const reason = prompt("Qual o motivo da devolução?");
-            if(reason) { 
-              submitDelivery(false, reason); 
-            }
+            // Vai para a tela nova de devolução em vez de usar prompt
+            setStep('RETURN');
           }}
           className={`flex-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 font-bold py-4 rounded-xl hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors ${!routeStarted ? 'opacity-50 cursor-not-allowed' : ''}`}>Devolver</button>
         
         <button 
-          // TRAVA NO BOTÃO REALIZAR BAIXA
           onClick={() => {
               if (!routeStarted) {
                   alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
