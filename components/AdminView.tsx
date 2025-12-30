@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification } from '../types';
-import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle} from 'lucide-react';
+import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard} from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 
@@ -49,6 +49,80 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [importSummary, setImportSummary] = useState<{ total: number; success: number; duplicates: number; errors: number; details: string[] } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+
+
+  // --- NOVOS ESTADOS DE FILTRO ---
+  const [filterDriver, setFilterDriver] = useState('');
+  const [filterVehicle, setFilterVehicle] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+
+// 1. ESTADOS DO FILTRO DE DATA
+  const [dashStartDate, setDashStartDate] = useState('');
+  const [dashEndDate, setDashEndDate] = useState('');
+
+  // 2. LÓGICA DE CÁLCULO (Recalcula sempre que as datas mudam)
+  const dashboardData = useMemo(() => {
+    return invoices.filter(inv => {
+       // Pega apenas a data YYYY-MM-DD da nota
+       const invoiceDate = inv.created_at.split('T')[0];
+       
+       // Verifica se está dentro do intervalo (se as datas estiverem preenchidas)
+       const isAfterStart = !dashStartDate || invoiceDate >= dashStartDate;
+       const isBeforeEnd = !dashEndDate || invoiceDate <= dashEndDate;
+       
+       return isAfterStart && isBeforeEnd;
+    });
+  }, [invoices, dashStartDate, dashEndDate]);
+
+// ... (cálculos anteriores de totalDeliveredValue, etc)
+
+  // 4. RANKING DE MOTORISTAS (Dinâmico e conectado ao filtro)
+  const driverRanking = useMemo(() => {
+    const stats: Record<string, { id: string; name: string; value: number; count: number }> = {};
+
+    dashboardData.forEach(inv => {
+      // Considera apenas entregas realizadas (DELIVERED)
+      if (inv.status === 'DELIVERED' && inv.driver_id) {
+        if (!stats[inv.driver_id]) {
+          const drv = drivers.find(d => d.id === inv.driver_id);
+          stats[inv.driver_id] = { 
+            id: inv.driver_id, 
+            name: drv ? drv.name : 'Desconhecido', 
+            value: 0, 
+            count: 0 
+          };
+        }
+        stats[inv.driver_id].value += inv.value;
+        stats[inv.driver_id].count += 1;
+      }
+    });
+
+    // Transforma em lista, ordena por Valor (do maior para o menor) e pega o Top 5
+    return Object.values(stats)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+  }, [dashboardData, drivers]);
+  
+
+  // 3. MÉTRICAS FINANCEIRAS E OPERACIONAIS (Baseadas no filtro acima)
+  
+  // R$ Total Entregue (Sucesso)
+  const totalDeliveredValue = dashboardData
+    .filter(i => i.status === 'DELIVERED')
+    .reduce((acc, inv) => acc + inv.value, 0);
+
+  // R$ Total Devolvido (Falha)
+  const totalFailedValue = dashboardData
+    .filter(i => i.status === 'FAILED')
+    .reduce((acc, inv) => acc + inv.value, 0);
+
+  // Contagens Simples
+  const countPending = dashboardData.filter(i => i.status === 'PENDING').length;
+  const countProgress = dashboardData.filter(i => i.status === 'IN_PROGRESS').length;
+  const countDelivered = dashboardData.filter(i => i.status === 'DELIVERED').length;
+  const countFailed = dashboardData.filter(i => i.status === 'FAILED').length;
 
   // --- ESTADO PARA O MODAL DE CONFIRMAÇÃO ---
   const [confirmModal, setConfirmModal] = useState<{
@@ -411,25 +485,34 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
   const filteredInvoices = useMemo(() => {
     return invoices.filter(inv => {
-      if (!searchTerm) return true;
+      // 1. Filtro de Texto
       const searchLower = searchTerm.toLowerCase();
-      
-      const statusMap: Record<string, string> = {
-        [DeliveryStatus.PENDING]: 'pendente',
-        [DeliveryStatus.IN_PROGRESS]: 'rota',
-        [DeliveryStatus.DELIVERED]: 'entregue',
-        [DeliveryStatus.FAILED]: 'devolvido'
-      };
-
-      return (
+      const matchesSearch = !searchTerm || (
         inv.number.includes(searchLower) ||
         inv.customer_name.toLowerCase().includes(searchLower) ||
         inv.value.toString().includes(searchLower) ||
-        inv.access_key.includes(searchLower) ||
-        statusMap[inv.status].includes(searchLower)
+        inv.access_key.includes(searchLower)
       );
+
+      // 2. Filtro de Motorista
+      const matchesDriver = !filterDriver || inv.driver_id === filterDriver;
+
+      // 3. Filtro de Veículo
+      const matchesVehicle = !filterVehicle || inv.vehicle_id === filterVehicle;
+
+      // 4. Filtro de Status
+      const matchesStatus = !filterStatus || inv.status === filterStatus;
+
+      // 5. Filtro de DATA POR PERÍODO (Intervalo) 📅
+      // Pegamos apenas a parte YYYY-MM-DD da data de criação da nota
+      const invoiceDate = inv.created_at.split('T')[0];
+      
+      const matchesStart = !filterStartDate || invoiceDate >= filterStartDate;
+      const matchesEnd = !filterEndDate || invoiceDate <= filterEndDate;
+
+      return matchesSearch && matchesDriver && matchesVehicle && matchesStatus && matchesStart && matchesEnd;
     });
-  }, [invoices, searchTerm]);
+  }, [invoices, searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate]);
 
   const toggleSelectAll = () => {
     if (selectedInvoiceIds.size > 0) {
@@ -752,6 +835,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
       <main className="container mx-auto p-4 md:p-8 space-y-6">
         
+       
+
         {/* Actions Bar */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
           <div>
@@ -796,15 +881,59 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
           </div>
         )}
 
-        {/* Dashboard Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* --- FILTRO GERAL DO DASHBOARD (VISÃO GERAL) --- */}
+        {/* Fica logo acima dos cards para fácil acesso */}
+        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in slide-in-from-top-2">
+            <div>
+               <h2 className="font-bold text-slate-800 dark:text-white text-lg flex items-center gap-2">
+                  <LayoutDashboard className="text-blue-600" /> Filtro Geral Dashboard
+               </h2>
+               <p className="text-xs text-slate-500">
+                  {dashboardData.length} registros encontrados no período.
+               </p>
+            </div>
+
+            {/* Campos de Data */}
+            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 px-2 border-r border-slate-200 dark:border-slate-700">
+                   <Clock size={14} className="text-slate-400"/>
+                   <span className="text-xs font-bold text-slate-500 uppercase">Período</span>
+                </div>
+                <input 
+                    type="date" 
+                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white cursor-pointer"
+                    value={dashStartDate}
+                    onChange={(e) => setDashStartDate(e.target.value)}
+                />
+                <span className="text-slate-400">-</span>
+                <input 
+                    type="date" 
+                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white cursor-pointer"
+                    value={dashEndDate}
+                    onChange={(e) => setDashEndDate(e.target.value)}
+                />
+                
+                {(dashStartDate || dashEndDate) && (
+                    <button 
+                        onClick={() => { setDashStartDate(''); setDashEndDate(''); }}
+                        className="ml-2 p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors"
+                        title="Limpar Datas"
+                    >
+                        <XCircle size={16} />
+                    </button>
+                )}
+            </div>
+        </div>
+
+        {/* --- 1. CARDS DE STATUS (MANTIDO) --- */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
            {[
-             { label: 'Pendentes', count: invoices.filter(i => i.status === DeliveryStatus.PENDING).length, icon: Clock, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
-             { label: 'Em Rota', count: invoices.filter(i => i.status === DeliveryStatus.IN_PROGRESS).length, icon: Navigation2, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-             { label: 'Entregues', count: invoices.filter(i => i.status === DeliveryStatus.DELIVERED).length, icon: CheckCircle, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
-             { label: 'Devoluções', count: invoices.filter(i => i.status === DeliveryStatus.FAILED).length, icon: AlertTriangle, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/20' },
+             { label: 'Pendentes', count: countPending, icon: Clock, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+             { label: 'Em Rota', count: countProgress, icon: Navigation2, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+             { label: 'Entregues', count: countDelivered, icon: CheckCircle, color: 'text-green-600 dark:text-green-400', bg: 'bg-green-50 dark:bg-green-900/20' },
+             { label: 'Devoluções', count: countFailed, icon: AlertTriangle, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/20' },
            ].map((stat, idx) => (
-             <div key={idx} className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between">
+             <div key={idx} className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase">{stat.label}</p>
                  <p className="text-2xl font-bold text-slate-800 dark:text-white">{stat.count}</p>
@@ -816,12 +945,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
            ))}
         </div>
 
-        {/* --- NOVO DASHBOARD FINANCEIRO --- */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* --- 2. DASHBOARD FINANCEIRO + RANKING (RESTAURADO) --- */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           
-          {/* Card 1: Faturamento Realizado */}
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-4 opacity-10">
+          {/* Card 1: Valor Entregue */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden group">
+             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                <DollarSign size={100} className="text-emerald-600 dark:text-emerald-400" />
              </div>
              <div>
@@ -829,15 +958,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                  <TrendingUp size={16} className="text-emerald-500"/> Valor Entregue
                </p>
                <h3 className="text-3xl font-black text-slate-800 dark:text-white mt-2 tracking-tight">
-                 {financialStats.totalDelivered.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                 {totalDeliveredValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                </h3>
-               <p className="text-xs text-slate-400 mt-1">Soma de todas as NFs baixadas com sucesso.</p>
+               <p className="text-xs text-slate-400 mt-1">Soma das notas baixadas no período.</p>
              </div>
           </div>
 
-          {/* Card 2: Valor Devolvido/Perdido */}
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-4 opacity-10">
+          {/* Card 2: Valor Devolvido */}
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden group">
+             <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                <AlertTriangle size={100} className="text-red-600 dark:text-red-400" />
              </div>
              <div>
@@ -845,40 +974,48 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                  <TrendingDown size={16} className="text-red-500"/> Valor Devolvido
                </p>
                <h3 className="text-3xl font-black text-slate-800 dark:text-white mt-2 tracking-tight">
-                 {financialStats.totalFailed.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                 {totalFailedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                </h3>
-               <p className="text-xs text-slate-400 mt-1">Soma das NFs com falha na entrega.</p>
+               <p className="text-xs text-slate-400 mt-1">Soma das falhas no período.</p>
              </div>
           </div>
 
-          {/* Card 3: Ranking de Motoristas */}
-          <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
-             <div className="flex items-center justify-between mb-4 border-b dark:border-slate-700 pb-2">
+          {/* Card 3: Ranking de Motoristas (RESTAURADO COM LÓGICA NOVA) */}
+          <div className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[200px]">
+             <div className="flex items-center justify-between mb-4 border-b border-slate-100 dark:border-slate-700 pb-2">
                <h3 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
                  <Award className="text-orange-500" size={20}/> Top Motoristas
                </h3>
-               <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-1 rounded font-bold">Por Entregas</span>
+               <span className="text-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-2 py-1 rounded font-bold">Por Valor</span>
              </div>
              
-             <div className="flex-1 overflow-y-auto space-y-3">
-               {financialStats.ranking.length === 0 ? (
-                 <p className="text-center text-slate-400 text-sm py-4 italic">Nenhuma entrega finalizada ainda.</p>
+             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-600">
+               {driverRanking.length === 0 ? (
+                 <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm italic opacity-60">
+                    <User size={24} className="mb-1"/>
+                    <p>Sem dados no período</p>
+                 </div>
                ) : (
-                 financialStats.ranking.map((driver, idx) => (
+                 driverRanking.map((driver, idx) => (
                    <div key={driver.id} className="flex items-center justify-between group">
                      <div className="flex items-center gap-3">
-                       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}`}>
+                       <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-sm ${
+                           idx === 0 ? 'bg-yellow-100 text-yellow-700 ring-2 ring-yellow-200' : 
+                           idx === 1 ? 'bg-slate-200 text-slate-700' :
+                           idx === 2 ? 'bg-orange-100 text-orange-800' :
+                           'bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                       }`}>
                          {idx + 1}
                        </div>
                        <div>
                          <p className="text-sm font-bold text-slate-700 dark:text-slate-200 leading-none">{driver.name}</p>
                          <p className="text-[10px] text-slate-400">
-                           {driver.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} acumulados por entrega
+                           {driver.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                          </p>
                        </div>
                      </div>
-                     <span className="text-sm font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full">
-                       {driver.count} {driver.count === 1 ? 'entrega' : 'entregas'}
+                     <span className="text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2 py-0.5 rounded-full">
+                       {driver.count}
                      </span>
                    </div>
                  ))
@@ -935,55 +1072,158 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
         )}
 
         {/* Invoices Table */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 flex justify-between items-center flex-wrap gap-4">
-            <h3 className="font-semibold text-slate-700 dark:text-slate-200">Gestão de Cargas</h3>
+       {/* --- TABELA DE GESTÃO COM FILTROS AVANÇADOS --- */}
+        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[calc(100vh-80px)]"> 
+          {/* h-[calc...] faz a tabela ocupar o resto da tela sem ser infinita */}
+
+          {/* CABEÇALHO E FILTROS */}
+          <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 space-y-4">
             
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 w-full md:w-80 focus-within:bg-white dark:focus-within:bg-slate-700 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-transparent transition-all">
-               <Search className="text-slate-400 h-4 w-4" />
-               <input 
-                 type="text" 
-                 placeholder="Buscar por cliente, NF, valor..." 
-                 className="flex-1 bg-transparent outline-none text-sm text-slate-700 dark:text-white placeholder-slate-400"
-                 value={searchTerm}
-                 onChange={(e) => setSearchTerm(e.target.value)}
-               />
-               {searchTerm && (
-                 <button onClick={() => setSearchTerm('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-                    <X size={14} />
-                 </button>
-               )}
+            <div className="flex justify-between items-center flex-wrap gap-2">
+               <h3 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                 <Filter size={18} /> Gestão de Cargas
+               </h3>
+               
+               {/* Resumo rápido */}
+               <span className="text-xs font-mono text-slate-500">
+                 Mostrando {filteredInvoices.length} de {invoices.length} notas
+               </span>
             </div>
+
+           
+            {/* ÁREA DE FILTROS (GRID OTIMIZADO V2 - DATA LARGA) */}
+            {/* Mudamos xl:grid-cols-5 para xl:grid-cols-6 para dar espaço duplo à data */}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+               
+               {/* 1. Busca Texto (1 Espaço) */}
+               <div className="relative col-span-2 md:col-span-1 xl:col-span-1">
+                 <Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4" />
+                 <input 
+                   type="text" 
+                   placeholder="Buscar..." 
+                   className="w-full pl-9 p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+                   value={searchTerm}
+                   onChange={(e) => setSearchTerm(e.target.value)}
+                 />
+               </div>
+
+               {/* 2. Filtro Motorista (1 Espaço) */}
+               <div className="col-span-1">
+                 <select 
+                   className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+                   value={filterDriver}
+                   onChange={(e) => setFilterDriver(e.target.value)}
+                 >
+                   <option value="">Motorista</option>
+                   {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                 </select>
+               </div>
+
+               {/* 3. Filtro Veículo (1 Espaço) */}
+               <div className="col-span-1">
+                 <select 
+                   className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+                   value={filterVehicle}
+                   onChange={(e) => setFilterVehicle(e.target.value)}
+                 >
+                   <option value="">Veículo</option>
+                   {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+                 </select>
+               </div>
+
+               {/* 4. Filtro Status (1 Espaço) */}
+               <div className="col-span-1">
+                 <select 
+                   className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+                   value={filterStatus}
+                   onChange={(e) => setFilterStatus(e.target.value)}
+                 >
+                   <option value="">Status</option>
+                   <option value="PENDING">Pendente</option>
+                   <option value="IN_PROGRESS">Em Rota</option>
+                   <option value="DELIVERED">Entregue</option>
+                   <option value="FAILED">Devolvido</option>
+                 </select>
+               </div>
+
+               {/* 5. Filtro Data (2 ESPAÇOS - O DOBRO DE TAMANHO) */}
+               {/* Aqui usamos col-span-2 no Desktop (xl) para a data respirar */}
+               <div className="flex gap-2 items-center col-span-2 md:col-span-2 xl:col-span-2">
+                 <div className="relative flex-1 min-w-0"> {/* min-w-0 evita overflow */}
+                    <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-900 px-1 text-[10px] text-slate-400 font-bold z-10">De</span>
+                    <input 
+                      type="date"
+                      className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+                      value={filterStartDate}
+                      onChange={(e) => setFilterStartDate(e.target.value)}
+                    />
+                 </div>
+                 
+                 <div className="relative flex-1 min-w-0">
+                    <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-900 px-1 text-[10px] text-slate-400 font-bold z-10">Até</span>
+                    <input 
+                      type="date"
+                      className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+                      value={filterEndDate}
+                      onChange={(e) => setFilterEndDate(e.target.value)}
+                    />
+                 </div>
+               </div>
+            </div>
+            
+           {/* Botão limpar filtros */}
+            {(searchTerm || filterDriver || filterVehicle || filterStatus || filterStartDate || filterEndDate) && (
+                <button 
+                  onClick={() => {
+                      setSearchTerm('');
+                      setFilterDriver('');
+                      setFilterVehicle('');
+                      setFilterStatus('');
+                      setFilterStartDate(''); // Zera Início
+                      setFilterEndDate('');   // Zera Fim
+                  }}
+                  className="text-xs text-red-500 hover:underline flex items-center gap-1"
+                >
+                    <X size={12} /> Limpar todos os filtros
+                </button>
+            )}
           </div>
           
-          <div className="overflow-x-auto">
+          {/* TABELA COM SCROLL INTERNO (Resolve o Ponto 2) */}
+          <div className="flex-1 overflow-auto"> 
             <table className="w-full text-sm text-left text-slate-600 dark:text-slate-400">
-              <thead className="text-xs text-slate-700 dark:text-slate-300 uppercase bg-slate-100 dark:bg-slate-900/50">
+              {/* CABEÇALHO DA TABELA COM CONTRASTE (Fundo Slate-700 / Texto Branco) */}
+              <thead className="text-xs text-white uppercase bg-slate-700 dark:bg-slate-900 sticky top-0 z-10 shadow-md">
                 <tr>
-                  <th className="px-6 py-3 w-10">
-                    <button onClick={toggleSelectAll} className="flex items-center justify-center text-slate-500 hover:text-slate-800 dark:hover:text-white">
-                      {selectedInvoiceIds.size > 0 && selectedInvoiceIds.size >= filteredInvoices.length && filteredInvoices.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                  {/* Célula do Checkbox */}
+                  <th className="px-6 py-4 w-10 bg-slate-700 dark:bg-slate-900 rounded-tl-lg"> {/* rounded-tl-lg arredonda o canto esquerdo */}
+                    <button onClick={toggleSelectAll} className="flex items-center justify-center text-slate-300 hover:text-white transition-colors">
+                      {selectedInvoiceIds.size > 0 && selectedInvoiceIds.size >= filteredInvoices.length && filteredInvoices.length > 0 ? <CheckSquare size={18} className="text-blue-400"/> : <Square size={18}/>}
                     </button>
                   </th>
-                  <th className="px-6 py-3">Nota Fiscal</th>
-                  <th className="px-6 py-3">Cliente</th>
-                  <th className="px-6 py-3">Status</th>
-                  <th className="px-6 py-3">Motorista</th>
-                  <th className="px-6 py-3">Veículo</th>
-                  <th className="px-6 py-3 text-right">Ações</th>
+                  
+                  {/* Outras Colunas (Adicionei bg-slate-700 em todas para o sticky funcionar bem) */}
+                  <th className="px-6 py-4 bg-slate-700 dark:bg-slate-900 font-bold tracking-wider">Nota / Data</th>
+                  <th className="px-6 py-4 bg-slate-700 dark:bg-slate-900 font-bold tracking-wider">Cliente</th>
+                  <th className="px-6 py-4 bg-slate-700 dark:bg-slate-900 font-bold tracking-wider">Status</th>
+                  <th className="px-6 py-4 bg-slate-700 dark:bg-slate-900 font-bold tracking-wider">Motorista</th>
+                  <th className="px-6 py-4 bg-slate-700 dark:bg-slate-900 font-bold tracking-wider">Veículo</th>
+                  
+                  {/* Célula de Ações (Canto direito arredondado) */}
+                  <th className="px-6 py-4 text-right bg-slate-700 dark:bg-slate-900 rounded-tr-lg font-bold tracking-wider">Ações</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {filteredInvoices.length === 0 ? (
                    <tr>
                      <td colSpan={7} className="px-6 py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2 w-full">
                        <Search size={32} className="opacity-20 mb-2"/>
-                       <p>Nenhuma nota encontrada {searchTerm && `para "${searchTerm}"`}.</p>
+                       <p>Nenhuma nota encontrada com os filtros atuais.</p>
                      </td>
                    </tr>
                 ) : (
                   filteredInvoices.map((inv) => (
-                    <tr key={inv.id} className={`bg-white dark:bg-slate-800 border-b dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50 ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30' : ''}`}>
+                    <tr key={inv.id} className={`bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
                       <td className="px-6 py-4">
                         <button onClick={() => toggleSelectOne(inv.id)} className="flex items-center justify-center text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">
                           {selectedInvoiceIds.has(inv.id) ? <CheckSquare size={18} className="text-blue-600 dark:text-blue-400"/> : <Square size={18}/>}
@@ -991,11 +1231,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                       </td>
                       <td className="px-6 py-4">
                         <div className="font-medium text-slate-900 dark:text-white">{inv.number}-{inv.series}</div>
-                        <div className="text-xs text-slate-400 font-mono truncate max-w-[100px]">{inv.access_key}</div>
+                        <div className="text-[10px] text-slate-400">
+                            {new Date(inv.created_at).toLocaleDateString('pt-BR')}
+                        </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900 dark:text-white">{inv.customer_name}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px]">{inv.customer_address}</div>
+                      <td className="px-6 py-4 max-w-[200px]">
+                        <div className="font-medium text-slate-900 dark:text-white truncate" title={inv.customer_name}>{inv.customer_name}</div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 truncate" title={inv.customer_address}>{inv.customer_address}</div>
                       </td>
                       <td className="px-6 py-4">
                         {getStatusBadge(inv.status)}
@@ -1033,7 +1275,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2">
-                         {/* Show Proof Button for Delivered/Failed */}
+                         {/* Visualizar Comprovante */}
                          {(inv.status === DeliveryStatus.DELIVERED || inv.status === DeliveryStatus.FAILED) && (
                             <button
                               onClick={() => handleViewProof(inv)}
@@ -1044,6 +1286,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                             </button>
                          )}
                          
+                         {/* Botão de Excluir Novo */}
                          <button 
                            onClick={() => handleDeleteInvoice(inv.id)}
                            className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30"
