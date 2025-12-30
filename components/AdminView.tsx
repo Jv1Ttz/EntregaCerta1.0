@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification } from '../types';
-import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer} from 'lucide-react';
+import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle} from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 
@@ -45,6 +45,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const fleetIntervalRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
+
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importSummary, setImportSummary] = useState<{ total: number; success: number; duplicates: number; errors: number; details: string[] } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // --- ESTADO PARA O MODAL DE CONFIRMAÇÃO ---
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    type: 'INVOICE' | 'BULK_INVOICE' | 'DRIVER' | 'VEHICLE' | null;
+    id?: string; // ID do item a ser excluido (se for unitário)
+    title: string;
+    message: string;
+  }>({ isOpen: false, type: null, title: '', message: '' });
 
   useEffect(() => {
     refreshData();
@@ -143,6 +156,49 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
+
+  // --- FUNÇÃO QUE EXECUTA A EXCLUSÃO REAL ---
+  const handleConfirmDelete = async () => {
+    if (!confirmModal.type) return;
+
+    try {
+      // 1. Exclusão de NOTA ÚNICA
+      if (confirmModal.type === 'INVOICE' && confirmModal.id) {
+        await db.deleteInvoice(confirmModal.id);
+        const newSet = new Set(selectedInvoiceIds);
+        if (newSet.has(confirmModal.id)) {
+          newSet.delete(confirmModal.id);
+          setSelectedInvoiceIds(newSet);
+        }
+      } 
+      
+      // 2. Exclusão em MASSA (Várias notas)
+      else if (confirmModal.type === 'BULK_INVOICE') {
+        const promises = Array.from(selectedInvoiceIds).map((id: string) => db.deleteInvoice(id));
+        await Promise.all(promises);
+        setSelectedInvoiceIds(new Set());
+      }
+      
+      // 3. Exclusão de MOTORISTA
+      else if (confirmModal.type === 'DRIVER' && confirmModal.id) {
+        await db.deleteDriver(confirmModal.id);
+      }
+      
+      // 4. Exclusão de VEÍCULO
+      else if (confirmModal.type === 'VEHICLE' && confirmModal.id) {
+        await db.deleteVehicle(confirmModal.id);
+      }
+
+      // Atualiza a tela e fecha o modal
+      await refreshData();
+      setConfirmModal({ ...confirmModal, isOpen: false });
+      
+    } catch (error) {
+      console.error("Erro ao excluir:", error);
+      alert("Erro ao tentar excluir. Verifique o console.");
+    }
+  };
+
   // --- LÓGICA DO DASHBOARD FINANCEIRO ---
   const financialStats = useMemo(() => {
     const deliveredInvoices = invoices.filter(i => i.status === 'DELIVERED');
@@ -207,19 +263,32 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
- const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files) {
-     // Adicionei ': any' para forçar o TypeScript a aceitar o arquivo
-      Array.from(files).forEach((file: any) => {
+ // --- NOVA LÓGICA DE IMPORTAÇÃO EM LOTE (DRAG & DROP) ---
+  const processXMLFiles = async (files: FileList | File[]) => {
+    setUploading(true);
+    setImportSummary(null);
+
+    const results = {
+      total: files.length,
+      success: 0,
+      duplicates: 0,
+      errors: 0,
+      details: [] as string[]
+    };
+
+    const newInvoices: Invoice[] = [];
+    const parser = new DOMParser();
+
+    // Cria uma Promessa para cada arquivo (para ler tudo junto)
+    const filePromises = Array.from(files).map((file) => {
+      return new Promise<void>((resolve) => {
         const reader = new FileReader();
-        reader.onload = async (e) => {
-          const text = e.target?.result as string;
+        reader.onload = (e) => {
           try {
-            const parser = new DOMParser();
+            const text = e.target?.result as string;
             const xmlDoc = parser.parseFromString(text, "text/xml");
-            
-            // Função auxiliar para pegar valor de tag
+
+            // --- SUA LÓGICA ORIGINAL COMEÇA AQUI ---
             const getValue = (tagName: string, context: Document | Element = xmlDoc) => 
               context.getElementsByTagName(tagName)[0]?.textContent || "";
 
@@ -228,29 +297,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
             const enderDest = dest?.getElementsByTagName("enderDest")[0];
             const total = xmlDoc.getElementsByTagName("total")[0];
             
-            // --- NOVA LÓGICA DE ENDEREÇO (O PULO DO GATO) 🐱 ---
+            // O PULO DO GATO 🐱 (Mantido!)
             const entregaTag = xmlDoc.getElementsByTagName("entrega")[0];
-            
-            // Se tiver a tag <entrega>, usamos ela como fonte do endereço.
-            // Se não, usamos o <enderDest> padrão do destinatário.
-            // Nota: Os nomes dos campos (xLgr, nro, CEP) são iguais nas duas tags.
             const addressSource = entregaTag ? entregaTag : enderDest;
-            // ----------------------------------------------------
 
-            // --- Lendo Dados Adicionais (Mantemos isso!) ---
+            // Dados Adicionais
             const infAdic = xmlDoc.getElementsByTagName("infAdic")[0];
             const infCpl = getValue("infCpl", infAdic); 
 
-            if (!dest || !addressSource) throw new Error("XML inválido: Endereço não encontrado");
+            if (!dest || !addressSource) throw new Error("XML sem destinatário/endereço");
 
             const nNF = getValue("nNF", ide);
             const serie = getValue("serie", ide);
             const vNF = getValue("vNF", total);
-            const xNome = getValue("xNome", dest); // Nome do cliente sempre vem do Destinatário
+            const xNome = getValue("xNome", dest);
             const CNPJ = getValue("CNPJ", dest);
             const CPF = getValue("CPF", dest);
             
-            // Extraindo endereço da fonte escolhida (Entrega ou Destinatário)
+            // Endereço
             const xLgr = getValue("xLgr", addressSource);
             const nro = getValue("nro", addressSource);
             const xCpl = getValue("xCpl", addressSource);
@@ -259,10 +323,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
             const UF = getValue("UF", addressSource);
             const CEP = getValue("CEP", addressSource);
 
-            // Monta o endereço base
             let formattedAddress = `${xLgr}, ${nro}${xCpl ? ` (${xCpl})` : ''} - ${xBairro}, ${xMun} - ${UF}`;
-
-            // Adiciona Observações se houver (Aquela lógica que já fizemos)
             if (infCpl && infCpl.trim().length > 0) {
                formattedAddress += ` || OBS/LOCAL: ${infCpl.toUpperCase()}`;
             }
@@ -274,46 +335,56 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
               if (idAttr && idAttr.startsWith("NFe")) chNFe = idAttr.substring(3);
             }
 
-            if (!nNF || !xNome) throw new Error("XML incompleto.");
+            if (!nNF || !xNome) throw new Error("Dados incompletos");
+            // --- FIM DA SUA LÓGICA ORIGINAL ---
 
-            const newInvoice: Invoice = {
-              id: `inv-${Date.now()}-${Math.random()}`, // Adicionei random para evitar IDs duplicados rápidos
-              access_key: chNFe || `GEN${Date.now()}`, 
-              number: nNF,
-              series: serie || '0',
-              customer_name: xNome,
-              customer_doc: CNPJ || CPF || 'Não informado',
-              customer_address: formattedAddress, // Endereço inteligente
-              customer_zip: CEP,
-              value: parseFloat(vNF || "0"),
-              status: DeliveryStatus.PENDING,
-              driver_id: null,
-              vehicle_id: null,
-              created_at: new Date().toISOString(),
-            };
+            // VERIFICAÇÃO DE DUPLICIDADE
+            // Verifica se já existe no banco (invoices) OU se já está na lista atual (newInvoices)
+            const alreadyExists = invoices.some(i => i.access_key === chNFe) || newInvoices.some(i => i.access_key === chNFe);
 
-            // Verifica duplicidade antes de salvar
-            const exists = invoices.some(i => i.access_key === newInvoice.access_key);
-            if (!exists) {
-                await db.addInvoice(newInvoice);
+            if (alreadyExists) {
+                results.duplicates++;
+                results.details.push(`⚠️ NF ${nNF}: Nota já lançada no sistema.`);
             } else {
-                console.log(`Nota ${nNF} já existe.`);
+                // Adiciona na fila para salvar
+                newInvoices.push({
+                  id: `inv-${Date.now()}-${Math.random()}`,
+                  access_key: chNFe || `GEN${Date.now()}`, 
+                  number: nNF,
+                  series: serie || '0',
+                  customer_name: xNome,
+                  customer_doc: CNPJ || CPF || 'Não informado',
+                  customer_address: formattedAddress,
+                  customer_zip: CEP,
+                  value: parseFloat(vNF || "0"),
+                  status: DeliveryStatus.PENDING,
+                  driver_id: null,
+                  vehicle_id: null,
+                  created_at: new Date().toISOString(),
+                });
+                results.success++;
             }
-
           } catch (error) {
-            console.error("Erro ao ler XML:", error);
-            alert("Erro ao ler um dos arquivos XML. Verifique o formato.");
+            results.errors++;
+            results.details.push(`❌ ${file.name}: Arquivo inválido ou erro de leitura.`);
           }
+          resolve();
         };
         reader.readAsText(file);
       });
-      
-      // Pequeno delay para atualizar a tela após processar vários arquivos
-      setTimeout(() => {
-          refreshData();
-          alert("Processamento concluído!");
-      }, 1000);
+    });
+
+    // Aguarda processar TODOS os arquivos
+    await Promise.all(filePromises);
+
+    // Salva os válidos no banco
+    if (newInvoices.length > 0) {
+        await Promise.all(newInvoices.map(inv => db.addInvoice(inv)));
+        await refreshData();
     }
+
+    setImportSummary(results); // Mostra o relatório
+    setUploading(false);
   };
 
   const handleLogisticsUpdate = async (invoiceId: string, field: 'driver' | 'vehicle', value: string) => {
@@ -378,10 +449,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     setSelectedInvoiceIds(newSet);
   };
 
+  // Substitua a função applyBulkAssignment antiga por esta:
   const applyBulkAssignment = async () => {
     if (selectedInvoiceIds.size === 0) return;
     if (!bulkDriver && !bulkVehicle) {
-      alert("Selecione um motorista ou veículo para atribuir.");
+      alert("Selecione um motorista ou veículo para atribuir."); // Esse alert de validação podemos manter ou trocar por Toast de erro também
       return;
     }
 
@@ -397,32 +469,42 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
     await Promise.all(promises);
     refreshData();
+    
+    // Limpa a seleção
     setSelectedInvoiceIds(new Set());
     setBulkDriver("");
     setBulkVehicle("");
-    alert("Atribuição em massa realizada com sucesso!");
+
+    // --- AQUI ESTÁ A MUDANÇA: TOAST EM VEZ DE ALERT 🍞 ---
+    setNotifications(prev => [...prev, {
+        id: `bulk-${Date.now()}`,
+        recipient_id: 'ADMIN',
+        title: 'Atribuição Concluída',
+        message: 'Motoristas e veículos vinculados com sucesso.',
+        type: 'SUCCESS',
+        read: false,
+        timestamp: new Date().toISOString()
+    }]);
   };
 
-  const handleDeleteInvoice = async (id: string) => {
-    if (confirm("Tem certeza que deseja excluir esta nota fiscal? Esta ação é irreversível.")) {
-      await db.deleteInvoice(id);
-      refreshData();
-      const newSet = new Set(selectedInvoiceIds);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-        setSelectedInvoiceIds(newSet);
-      }
-    }
+  const handleDeleteInvoice = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      type: 'INVOICE',
+      id: id,
+      title: 'Excluir Nota Fiscal?',
+      message: 'Tem certeza que deseja remover esta nota fiscal do sistema? Esta ação é irreversível.'
+    });
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (selectedInvoiceIds.size === 0) return;
-    if (confirm(`Tem certeza que deseja excluir ${selectedInvoiceIds.size} notas fiscais?`)) {
-      const promises = Array.from(selectedInvoiceIds).map((id: string) => db.deleteInvoice(id));
-      await Promise.all(promises);
-      setSelectedInvoiceIds(new Set());
-      refreshData();
-    }
+    setConfirmModal({
+      isOpen: true,
+      type: 'BULK_INVOICE',
+      title: `Excluir ${selectedInvoiceIds.size} Notas?`,
+      message: `Você está prestes a remover ${selectedInvoiceIds.size} notas fiscais selecionadas. Confirma a exclusão em massa?`
+    });
   };
 
   const handleViewProof = async (invoice: Invoice) => {
@@ -453,11 +535,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
-  const handleDeleteDriver = async (id: string) => {
-    if(confirm("Deseja remover este motorista? As entregas voltarão para 'Pendentes'.")) {
-      await db.deleteDriver(id);
-      refreshData();
-    }
+  const handleDeleteDriver = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      type: 'DRIVER',
+      id: id,
+      title: 'Remover Motorista?',
+      message: 'Ao remover este motorista, todas as entregas vinculadas a ele voltarão para o status "Pendente".'
+    });
   };
 
   const handleCreateVehicle = async (e: React.FormEvent) => {
@@ -479,11 +564,14 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     }
   };
 
-  const handleDeleteVehicle = async (id: string) => {
-    if(confirm("Deseja remover este veículo?")) {
-      await db.deleteVehicle(id);
-      refreshData();
-    }
+  const handleDeleteVehicle = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      type: 'VEHICLE',
+      id: id,
+      title: 'Remover Veículo?',
+      message: 'Deseja realmente remover este veículo da frota?'
+    });
   };
 
   const handleUpdateAdminPassword = async (e: React.FormEvent) => {
@@ -688,11 +776,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
               <ScanBarcode className="h-4 w-4" /> <span className="font-medium text-sm">Ler DANFE</span>
             </button>
 
-            <label className={`flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md cursor-pointer transition-colors shadow-sm ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
-              {uploading ? <Clock className="animate-spin h-4 w-4" /> : <Upload className="h-4 w-4" />}
+           <button 
+              onClick={() => setShowImportModal(true)} 
+              className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md cursor-pointer transition-colors shadow-sm"
+            >
+              <UploadCloud className="h-4 w-4" />
               <span className="font-medium text-sm">Importar XML</span>
-              <input type="file" accept=".xml" className="hidden" onChange={handleFileUpload} disabled={uploading} />
-            </label>
+            </button>
           </div>
         </div>
 
@@ -1416,6 +1506,152 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
              className="max-w-full max-h-full object-contain rounded shadow-2xl"
              onClick={(e) => e.stopPropagation()} 
            />
+        </div>
+      )}
+
+      {/* --- MODAL DE IMPORTAÇÃO XML (DRAG & DROP) --- */}
+      {showImportModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-700 flex flex-col max-h-[90vh]">
+              
+              {/* Cabeçalho */}
+              <div className="p-4 bg-slate-100 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center">
+                 <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                    <UploadCloud className="text-blue-600" /> Importar Notas Fiscais
+                 </h3>
+                 <button onClick={() => { setShowImportModal(false); setImportSummary(null); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20}/></button>
+              </div>
+
+              <div className="p-6 flex-1 overflow-y-auto">
+                 
+                 {/* RESUMO PÓS-IMPORTAÇÃO */}
+                 {importSummary ? (
+                    <div className="space-y-6 animate-in zoom-in-95 duration-300">
+                        <div className="grid grid-cols-3 gap-4 text-center">
+                            <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg border border-green-100 dark:border-green-800">
+                                <span className="block text-2xl font-bold text-green-600 dark:text-green-400">{importSummary.success}</span>
+                                <span className="text-xs text-green-800 dark:text-green-200 uppercase font-bold">Importados</span>
+                            </div>
+                            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-100 dark:border-yellow-800">
+                                <span className="block text-2xl font-bold text-yellow-600 dark:text-yellow-400">{importSummary.duplicates}</span>
+                                <span className="text-xs text-yellow-800 dark:text-yellow-200 uppercase font-bold">Duplicados</span>
+                            </div>
+                            <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-lg border border-red-100 dark:border-red-800">
+                                <span className="block text-2xl font-bold text-red-600 dark:text-red-400">{importSummary.errors}</span>
+                                <span className="text-xs text-red-800 dark:text-red-200 uppercase font-bold">Erros</span>
+                            </div>
+                        </div>
+
+                        {importSummary.details.length > 0 && (
+                            <div className="bg-slate-50 dark:bg-slate-900 p-4 rounded-lg border border-slate-200 dark:border-slate-700 max-h-40 overflow-y-auto text-xs font-mono space-y-1">
+                                <p className="font-bold mb-2 text-slate-500">Detalhes:</p>
+                                {importSummary.details.map((msg, i) => (
+                                    <div key={i} className="text-slate-600 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-1 last:border-0">
+                                        {msg}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <button 
+                            onClick={() => setImportSummary(null)} 
+                            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <UploadCloud size={18} /> Importar Mais Arquivos
+                        </button>
+                    </div>
+                 ) : (
+                    /* ÁREA DE DRAG & DROP */
+                    <div 
+                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            setIsDragging(false);
+                            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                                processXMLFiles(e.dataTransfer.files);
+                            }
+                        }}
+                        className={`
+                            border-2 border-dashed rounded-xl h-64 flex flex-col items-center justify-center transition-all cursor-pointer relative
+                            ${isDragging 
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 scale-[1.02]' 
+                                : 'border-slate-300 dark:border-slate-600 hover:border-blue-400 hover:bg-slate-50 dark:hover:bg-slate-800/50'}
+                        `}
+                    >
+                        {uploading ? (
+                            <div className="text-center">
+                                <Loader2 className="h-10 w-10 text-blue-600 animate-spin mx-auto mb-4" />
+                                <p className="text-slate-600 dark:text-slate-300 font-bold">Processando arquivos...</p>
+                            </div>
+                        ) : (
+                            <>
+                                <input 
+                                    type="file" 
+                                    multiple 
+                                    accept=".xml" 
+                                    className="absolute inset-0 opacity-0 cursor-pointer"
+                                    onChange={(e) => {
+                                        if (e.target.files && e.target.files.length > 0) processXMLFiles(e.target.files);
+                                    }}
+                                />
+                                <div className="bg-blue-100 dark:bg-blue-900/50 p-4 rounded-full mb-4">
+                                    <UploadCloud size={32} className="text-blue-600 dark:text-blue-400" />
+                                </div>
+                                <h4 className="text-lg font-bold text-slate-700 dark:text-white mb-2">
+                                    Arraste seus XMLs aqui
+                                </h4>
+                                <p className="text-sm text-slate-400 mb-6">
+                                    ou clique para selecionar do computador
+                                </p>
+                                <div className="flex gap-4 text-xs text-slate-400">
+                                    <span className="flex items-center gap-1"><FileCheck size={14}/> Múltiplos Arquivos</span>
+                                    <span className="flex items-center gap-1"><CheckCircle size={14}/> Validação Automática</span>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                 )}
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE CONFIRMAÇÃO DE EXCLUSÃO (GENÉRICO) --- */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 scale-100 animate-in zoom-in-95 duration-200">
+              
+              <div className="p-6 text-center">
+                 <div className="mx-auto bg-red-100 dark:bg-red-900/30 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+                    <Trash2 size={32} className="text-red-600 dark:text-red-400" />
+                 </div>
+                 
+                 <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+                    {confirmModal.title}
+                 </h3>
+                 
+                 <p className="text-slate-500 dark:text-slate-400 mb-8">
+                    {confirmModal.message}
+                 </p>
+
+                 <div className="flex gap-3">
+                    <button 
+                      onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                      className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                    >
+                       Cancelar
+                    </button>
+                    
+                    <button 
+                      onClick={handleConfirmDelete}
+                      className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shadow-lg shadow-red-200 dark:shadow-none transition-colors"
+                    >
+                       Sim, Excluir
+                    </button>
+                 </div>
+              </div>
+           </div>
         </div>
       )}
 
