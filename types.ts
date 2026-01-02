@@ -37,6 +37,10 @@ export interface Invoice {
   driver_id: string | null;
   vehicle_id: string | null; // The vehicle assigned for this specific delivery
   created_at: string;
+  items?: InvoiceItem[];   // Lista de produtos importados
+  return_value?: number;
+  failure_reason?: string; // Já deve ter
+  return_items?: string;   // <--- ADICIONE SE NÃO TIVER
 }
 
 export interface DeliveryProof {
@@ -63,6 +67,15 @@ export interface AppNotification {
   type: 'INFO' | 'SUCCESS' | 'WARNING';
   read: boolean;
   timestamp: string;
+}
+
+export interface InvoiceItem {
+  itemIndex: string;
+  code: string;
+  name: string;     // Essencial para corrigir o erro "name não existe"
+  quantity: number; // Essencial para corrigir o erro anterior de "string vs number"
+  unit: string;
+  value: number;
 }
 
 export type ViewState = 

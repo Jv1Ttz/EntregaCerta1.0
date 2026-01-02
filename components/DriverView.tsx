@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2 } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
@@ -87,6 +87,24 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  // 👇 2. FUNÇÃO AUXILIAR PARA CRIAR O OBJETO COMPLETO 👇
+  const notify = (title: string, message: string, type: 'SUCCESS' | 'WARNING' | 'INFO' = 'WARNING') => {
+    setNotifications(prev => [...prev, {
+        id: `driver-alert-${Date.now()}-${Math.random()}`,
+        recipient_id: driverId,
+        title: title,
+        message: message,
+        type: type,
+        read: false,
+        timestamp: new Date().toISOString()
+    }]);
+  };
+
+  // Função de remover (necessária para o X do toast)
+ 
+  // 👆 FIM DA CONFIGURAÇÃO DO TOAST 👆
   
   // --- LÓGICA DE ESTADO (Persistência Diária) ---
   const [routeStarted, setRouteStarted] = useState(() => {
@@ -101,7 +119,6 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [isTracking, setIsTracking] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
   const wakeLockRef = useRef<any>(null);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const watchIdRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
 
@@ -241,6 +258,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           refreshData();
         }}
         routeStarted={routeStarted} 
+        notify={notify}
+        removeNotification={removeNotification}
+        notifications={notifications}
       />
     );
   }
@@ -381,7 +401,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 };
 
 // -- DELIVERY ACTION --
-const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted }) => {
+const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean, notify: (title: string, message: string, type?: 'SUCCESS' | 'WARNING' | 'INFO') => void, notifications: AppNotification[], removeNotification: (id: string) => void }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted, notify, notifications, removeNotification }) => {
   // Estados de Controle
   const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'RETURN' | 'SUCCESS'>('DETAILS');
   const [loading, setLoading] = useState(false);
@@ -400,6 +420,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   const [failureReason, setFailureReason] = useState('');
   const [returnType, setReturnType] = useState<'TOTAL' | 'PARTIAL'>('TOTAL');
   const [returnItems, setReturnItems] = useState('');
+  const [selectedReturnItems, setSelectedReturnItems] = useState<string[]>([]);
 
   useEffect(() => {
     if (!frozenGeo && currentGeo) {
@@ -433,7 +454,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
             setPhotoStub(compressedBase64);
         }
       } catch (err) {
-        alert("Erro ao processar imagem. Tente novamente.");
+        notify("Erro ao processar imagem. Tente novamente.");
         console.error(err);
       } finally {
         setLoading(false);
@@ -444,40 +465,68 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   const submitDelivery = async (success: boolean, reasonOverride?: string) => {
     // Validações
     if (!routeStarted) {
-        alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS.");
+        notify("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS.");
         return;
     }
 
     if (success) {
       if (!signature && !photo) {
-        alert("É necessário pelo menos uma Assinatura ou Foto para comprovar a entrega.");
+        notify("É necessário pelo menos uma Assinatura ou Foto para comprovar a entrega.");
         return;
       }
       if (!receiverName) {
-         alert("Nome do recebedor é obrigatório.");
+         notify("Nome do recebedor é obrigatório.");
          return;
       }
     } else {
-      // Validação de Devolução
-      if (!failureReason) return alert("Informe o motivo da devolução.");
-      if (returnType === 'PARTIAL' && !returnItems) return alert("Informe quais itens retornaram.");
+      // Validação de Falha (Motivo)
+      const reasonToCheck = reasonOverride || failureReason;
+      if (!reasonToCheck) return notify("Informe o motivo da devolução.");
     }
 
     setLoading(true);
 
     try {
+        // 👇 PREPARA O TEXTO DOS ITENS 👇
+        let finalReturnItemsString = returnItems; // Padrão: texto manual
+
+        if (!success && returnType === 'PARTIAL' && invoice.items && invoice.items.length > 0) {
+            // Pega apenas os itens que o motorista clicou (ID está no array selectedReturnItems)
+            const selectedObjs = invoice.items.filter(i => selectedReturnItems.includes(i.code));
+            
+            // Monta o texto: "[CODIGO] NOME (QTD UN)"
+            finalReturnItemsString = selectedObjs
+                .map(i => `[${i.code}] ${i.name} (${i.quantity} ${i.unit})`)
+                .join('\n');
+        }
+
+        // Verifica se o texto final ficou vazio.
+        if (!success && returnType === 'PARTIAL' && !finalReturnItemsString.trim()) {
+            setLoading(false);
+            if (invoice.items && invoice.items.length > 0) {
+                return notify("⚠️ Selecione pelo menos um item na lista de produtos.");
+            } else {
+                return notify("⚠️ Digite quais itens foram devolvidos.");
+            }
+        }
+        // 👆 FIM DA PREPARAÇÃO 👆
+
       const proof: DeliveryProof = {
         invoice_id: invoice.id,
         receiver_name: success ? receiverName : 'N/A',
         receiver_doc: success ? receiverDoc : 'N/A',
         signature_data: success ? signature : '',
         photo_url: success ? photo : '',
-        photo_stub_url: success ? photoStub : '', // Envia o canhoto
+        photo_stub_url: success ? photoStub : '',
 
         // --- DADOS DE DEVOLUÇÃO ---
         return_type: success ? undefined : returnType,
-        return_items: success ? undefined : returnItems,
-        failure_reason: success ? undefined : failureReason,
+        
+        // 🚨 CORREÇÃO IMPORTANTE AQUI:
+        // Use 'finalReturnItemsString' em vez de 'returnItems'
+        return_items: success ? undefined : finalReturnItemsString, 
+        
+        failure_reason: success ? undefined : (reasonOverride || failureReason),
         // -------------------------
 
         geo_lat: frozenGeo?.lat || null,
@@ -486,38 +535,43 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
       };
 
       await db.saveProof(proof);
-      setStep('SUCCESS');
+      
+      // ✅ AQUI É O LUGAR CORRETO DO SUCCESS
+      // Só executa se o db.saveProof não der erro
+      setStep('SUCCESS'); 
+
     } catch (e) {
-      alert("Erro ao salvar. Tente novamente.");
+      notify("Erro ao salvar. Tente novamente.");
       console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
-  // --- TELAS DO MODAL ---
-
-  if (step === 'SUCCESS') {
+    if (step === 'SUCCESS') {
     return (
       <div className="min-h-screen bg-green-500 text-white flex flex-col items-center justify-center p-8 text-center animate-in fade-in zoom-in duration-300">
         <div className="bg-white text-green-500 p-6 rounded-full mb-6 shadow-xl"><CheckCircle size={64} strokeWidth={3} /></div>
         <h1 className="text-3xl font-black mb-2">Sucesso!</h1>
         <p className="text-green-100 text-lg mb-8">Informações sincronizadas.</p>
         <button onClick={onBack} className="w-full bg-white text-green-600 font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-transform">Voltar para Rota</button>
+        <ToastContainer notifications={notifications} onRemove={removeNotification} />
       </div>
     );
   }
 
-  // --- TELA DE DEVOLUÇÃO (NOVA) ---
+  // --- TELA DE DEVOLUÇÃO (ATUALIZADA) ---
   if (step === 'RETURN') {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex flex-col transition-colors duration-300">
+        {/* Cabeçalho */}
         <div className="bg-white dark:bg-slate-800 p-4 shadow-sm border-b dark:border-slate-700 flex items-center gap-2 sticky top-0 z-10">
           <button onClick={() => setStep('DETAILS')} className="p-2 -ml-2 text-gray-600 dark:text-slate-300"><ChevronLeft /></button>
           <h2 className="font-bold text-lg text-gray-800 dark:text-white">Registrar Devolução</h2>
         </div>
 
         <div className="flex-1 p-6 space-y-6 overflow-y-auto">
+           {/* Seleção do Tipo */}
            <div className="space-y-3">
              <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">O que aconteceu?</label>
              <div className="grid grid-cols-2 gap-4">
@@ -532,38 +586,77 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
              </div>
            </div>
 
+           {/* LISTA DE DEVOLUÇÃO INTELIGENTE (NOVO CÓDIGO AQUI) */}
+           {returnType === 'PARTIAL' && (
+             <div className="space-y-3 animate-in fade-in slide-in-from-top-4">
+                <label className="text-sm font-bold text-orange-600 dark:text-orange-400 uppercase flex items-center gap-2">
+                  <Package size={16} /> Selecione o que voltou:
+                </label>
+                
+                {/* Se tem itens do XML */}
+                {invoice.items && invoice.items.length > 0 ? (
+                    <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700 max-h-60 overflow-y-auto">
+                        {invoice.items.map((item, idx) => {
+                            const isSelected = selectedReturnItems.includes(item.code);
+                            return (
+                                <div 
+                                    key={idx} 
+                                    className={`p-3 flex items-start gap-3 cursor-pointer transition-colors ${isSelected ? 'bg-orange-50 dark:bg-orange-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
+                                    onClick={() => {
+                                        if (isSelected) setSelectedReturnItems(prev => prev.filter(id => id !== item.code));
+                                        else setSelectedReturnItems(prev => [...prev, item.code]);
+                                    }}
+                                >
+                                    <div className={`w-5 h-5 rounded border flex items-center justify-center mt-0.5 transition-all ${isSelected ? 'bg-orange-500 border-orange-500 text-white' : 'border-slate-300 dark:border-slate-500'}`}>
+                                        {isSelected && <CheckCircle size={14} />}
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className={`text-sm font-bold leading-tight ${isSelected ? 'text-orange-800 dark:text-orange-300' : 'text-slate-700 dark:text-slate-200'}`}>
+                                            {item.name}
+                                        </p>
+                                        <p className="text-xs text-slate-500 mt-1">
+                                            Cód: {item.code} • Qtd: {item.quantity} {item.unit}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    // Se NÃO tem itens (Manual)
+                    <textarea 
+                      placeholder="Descreva os itens devolvidos..."
+                      className="w-full p-4 rounded-lg border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/10 text-slate-900 dark:text-white focus:border-orange-500 outline-none h-32 resize-none placeholder:text-slate-400"
+                      value={returnItems}
+                      onChange={e => setReturnItems(e.target.value)}
+                    />
+                )}
+             </div>
+           )}
+
+           {/* Motivo Obrigatório */}
            <div className="space-y-2">
               <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">Motivo / Observação</label>
               <textarea 
                 placeholder={returnType === 'TOTAL' ? "Ex: Estabelecimento fechado, cliente ausente..." : "Ex: Caixa rasgada, produto vencido..."}
-                className="w-full p-4 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-blue-500 outline-none h-32 resize-none"
+                className="w-full p-4 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-blue-500 outline-none h-32 resize-none placeholder:text-slate-400"
                 value={failureReason}
                 onChange={e => setFailureReason(e.target.value)}
               />
            </div>
-
-           {returnType === 'PARTIAL' && (
-             <div className="space-y-2 animate-in slide-in-from-top-4 fade-in">
-                <label className="text-sm font-bold text-orange-600 dark:text-orange-400 uppercase flex items-center gap-2"><Package size={16} /> Quais itens voltaram?</label>
-                <textarea 
-                  placeholder="Liste os produtos e quantidades..."
-                  className="w-full p-4 rounded-lg border border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/10 text-slate-900 dark:text-white focus:border-orange-500 outline-none h-32 resize-none"
-                  value={returnItems}
-                  onChange={e => setReturnItems(e.target.value)}
-                />
-             </div>
-           )}
         </div>
 
+        {/* Botão Confirmar */}
         <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0">
-          <button onClick={() => submitDelivery(false)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform">
+          <button onClick={() => submitDelivery(false)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
+            {loading ? <Loader2 className="animate-spin" /> : <AlertTriangle size={20} />}
             Confirmar Devolução {returnType === 'TOTAL' ? 'Total' : 'Parcial'}
           </button>
         </div>
+        <ToastContainer notifications={notifications} onRemove={removeNotification} />
       </div>
     );
   }
-
   // --- TELA DE BAIXA (PROOF) ---
   if (step === 'PROOF') {
     return (
@@ -646,6 +739,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
             {loading ? 'Enviando...' : 'Confirmar Entrega'}
           </button>
         </div>
+        <ToastContainer notifications={notifications} onRemove={removeNotification} />
       </div>
     );
   }
@@ -723,7 +817,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         <button onClick={() => {
             // LÓGICA DE DEVOLUÇÃO ATUALIZADA
             if (!routeStarted) {
-                alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de devolver a mercadoria.");
+                notify("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de devolver a mercadoria.");
                 return;
             }
             // Vai para a tela nova de devolução em vez de usar prompt
@@ -734,7 +828,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         <button 
           onClick={() => {
               if (!routeStarted) {
-                  alert("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
+                  notify("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS antes de confirmar a entrega.");
                   return;
               }
               setStep('PROOF');
@@ -744,6 +838,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
             {!routeStarted && <Lock size={16} className="inline ml-2" />}
         </button>
       </div>
+      <ToastContainer notifications={notifications} onRemove={removeNotification} />
     </div>
   );
 };

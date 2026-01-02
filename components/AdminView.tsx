@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
-import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification } from '../types';
+import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
 import { Truck, Upload, Map, FileText, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard} from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
@@ -402,6 +402,29 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                formattedAddress += ` || OBS/LOCAL: ${infCpl.toUpperCase()}`;
             }
 
+// 👇👇👇 INÍCIO DA NOVA LÓGICA DE ITENS 👇👇👇
+            const extractedItems: InvoiceItem[] = [];
+            const detTags = xmlDoc.getElementsByTagName("det"); // Pega todas as tags <det>
+
+            for (let i = 0; i < detTags.length; i++) {
+                const det = detTags[i];
+                const nItem = det.getAttribute("nItem") || String(i + 1);
+                
+                const prod = det.getElementsByTagName("prod")[0]; // Entra na tag <prod>
+                
+                if (prod) {
+                  extractedItems.push({
+                  itemIndex: nItem,
+                  code: getValue("cProd", prod),
+                  name: getValue("xProd", prod), // <--- O erro aponta aqui. Se "name" não existir no tipo, ele reclama.
+                  quantity: parseFloat(getValue("qCom", prod) || "0"),
+                  unit: getValue("uCom", prod),
+                  value: parseFloat(getValue("vProd", prod) || "0")
+                  });
+                }
+            }
+            // 👆👆👆 FIM DA NOVA LÓGICA DE ITENS 👆👆👆
+
             let chNFe = getValue("chNFe");
             if (!chNFe) {
               const infNFe = xmlDoc.getElementsByTagName("infNFe")[0];
@@ -435,6 +458,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                   driver_id: null,
                   vehicle_id: null,
                   created_at: new Date().toISOString(),
+                  items: extractedItems
                 });
                 results.success++;
             }
@@ -1240,7 +1264,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
                         <div className="text-xs text-slate-500 dark:text-slate-400 truncate" title={inv.customer_address}>{inv.customer_address}</div>
                       </td>
                       <td className="px-6 py-4">
-                        {getStatusBadge(inv.status)}
+                    {getStatusBadge(inv.status)}
                       </td>
                       
                       {/* Driver Selection */}
