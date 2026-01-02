@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EntregaCerta</string>
+    <string name="title_activity_main">EntregaCerta</string>
+    <string name="package_name">com.entregacerta.app</string>
+    <string name="custom_url_scheme">com.entregacerta.app</string>
+</resources>

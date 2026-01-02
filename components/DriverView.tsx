@@ -4,7 +4,12 @@ import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotificatio
 import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
+import { registerPlugin } from '@capacitor/core';
+// Importamos o TIPO para o TypeScript entender os comandos
+import type { BackgroundGeolocationPlugin } from '@capacitor-community/background-geolocation';
 
+// Registramos a variável manualmente
+const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
 // --- FUNÇÃO DE LIMPEZA INTELIGENTE ---
 const getSmartGPSAddress = (fullString: string, zip: string) => {
     const parts = fullString.split("||");
@@ -185,29 +190,59 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
       }
   };
 
-  const startTracking = () => {
-    if ('geolocation' in navigator) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        (position) => {
+  // --- FUNÇÕES DE GPS (PLUGIN BACKGROUND) ---
+  
+  const startTracking = async () => {
+    try {
+      // 1. Pede permissão
+      // O plugin vai abrir um pop-up nativo. O usuário deve escolher "PERMITIR O TEMPO TODO".
+      
+      // 2. Adiciona o "Vigia" (Watcher)
+      const watcherId = await BackgroundGeolocation.addWatcher(
+        {
+          backgroundMessage: "Rastreando localização para entrega.",
+          backgroundTitle: "EntregaCerta em execução",
+          requestPermissions: true,
+          stale: true, // Não aceita localização velha em cache
+          distanceFilter: 5 // Só atualiza se o motorista andar 10 metros (Economiza bateria/dados)
+        },
+        (location, error) => {
+          if (error) {
+            if (error.code === "NOT_AUTHORIZED") {
+              if (window.confirm("Para rastrear com a tela desligada, vá em Configurações > Permissões e escolha 'Permitir o tempo todo'. Deseja abrir agora?")) {
+                BackgroundGeolocation.openSettings();
+              }
+            }
+            return console.error(error);
+          }
+
+          // SUCESSO!
           setIsTracking(true);
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
+          // O plugin retorna latitude/longitude direto no objeto location
+          const lat = location.latitude;
+          const lng = location.longitude;
+          
           setCurrentLocation({ lat, lng });
+          
+          // Envia para o banco
           db.updateDriverLocation(driverId, lat, lng);
-        },
-        (error) => {
-          console.warn("GPS Warning:", error.message);
-          setIsTracking(false);
-        },
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 10000 }
+        }
       );
+      
+      // Salva o ID para poder parar depois
+      watchIdRef.current = watcherId as any; // O tipo do ID pode variar, 'as any' resolve rápido
+
+    } catch (err) {
+      console.error("Erro ao iniciar GPS Background:", err);
+      notify("Erro GPS", "Falha ao iniciar rastreio.", "WARNING");
     }
   };
 
-  const stopTracking = () => {
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
+  const stopTracking = async () => {
+    if (watchIdRef.current) {
+      await BackgroundGeolocation.removeWatcher({ id: watchIdRef.current });
       watchIdRef.current = null;
+      setIsTracking(false);
     }
   };
 
@@ -707,7 +742,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         </div>
 
         {/* Botão Confirmar */}
-        <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0">
+        <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0 z-50">
           <button onClick={() => submitDelivery(false)} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform flex items-center justify-center gap-2">
             {loading ? <Loader2 className="animate-spin" /> : <AlertTriangle size={20} />}
             Confirmar Devolução {returnType === 'TOTAL' ? 'Total' : 'Parcial'}
@@ -794,7 +829,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
           </div>
 
         </div>
-        <div className="p-4 bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0 space-y-3">
+        <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0 space-y-3 z-50">
           <button onClick={() => submitDelivery(true)} disabled={loading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform disabled:opacity-50 disabled:scale-100">
             {loading ? 'Enviando...' : 'Confirmar Entrega'}
           </button>
@@ -873,7 +908,8 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
          </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 flex gap-3 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+      {/* Adicionei 'pb-[calc(1rem+env(safe-area-inset-bottom))]' para respeitar a barra do Android */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800 flex gap-3 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-50">
         <button onClick={() => {
             // LÓGICA DE DEVOLUÇÃO ATUALIZADA
             if (!routeStarted) {
