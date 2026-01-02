@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2 } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, CheckCircle, XCircle, ChevronLeft, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 
@@ -87,6 +87,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showHistory, setShowHistory] = useState(false); // Começa fechado
 
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   // 👇 2. FUNÇÃO AUXILIAR PARA CRIAR O OBJETO COMPLETO 👇
@@ -266,7 +267,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   }
 
   const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
-  const historyInvoices = invoices.filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED);
+  // Filtra e ORDENA por data (mais recente primeiro) 
+  const historyInvoices = invoices .filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED) .sort((a, b) => new Date(b.delivered_at || b.created_at).getTime() - new Date(a.delivered_at || a.created_at).getTime());  
   const currentVehicleId = pendingInvoices[0]?.vehicle_id;
   const currentVehicle = vehicles.find(v => v.id === currentVehicleId);
 
@@ -376,23 +378,60 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
         </div>
 
         {historyInvoices.length > 0 && (
-          <div>
-            <h2 className="text-lg font-bold text-gray-800 dark:text-slate-300 mb-3 px-1 mt-6 opacity-70">Histórico</h2>
-            <div className="space-y-2 opacity-70">
-              {historyInvoices.map(inv => (
-                <div key={inv.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-gray-200 dark:border-slate-700 flex justify-between items-center">
-                  <div>
-                    <div className="font-medium text-gray-800 dark:text-white">NF {inv.number}</div>
-                    <div className="text-xs text-gray-500 dark:text-slate-400">{inv.customer_name}</div>
-                  </div>
-                  {inv.status === DeliveryStatus.DELIVERED ? (
-                    <span className="text-green-600 dark:text-green-400 flex items-center gap-1 text-sm font-bold"><CheckCircle size={16}/> Entregue</span>
-                  ) : (
-                    <span className="text-red-500 dark:text-red-400 flex items-center gap-1 text-sm font-bold"><XCircle size={16}/> Falhou</span>
-                  )}
+          <div className="mt-6 mb-20"> {/* Margem inferior para não ficar atrás do menu fixo */}
+            
+            {/* CABEÇALHO DO HISTÓRICO (BOTÃO CLICKÁVEL) */}
+            <button 
+                onClick={() => setShowHistory(!showHistory)}
+                className="w-full flex justify-between items-center bg-white dark:bg-slate-800 p-4 rounded-xl border border-gray-200 dark:border-slate-700 shadow-sm active:scale-[0.98] transition-all"
+            >
+                <div className="text-left">
+                    <h2 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                       Histórico
+                       <span className="text-xs font-normal bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full text-slate-500">
+                         {historyInvoices.length}
+                       </span>
+                    </h2>
+                    <p className="text-xs text-gray-400 dark:text-slate-500">Entregas finalizadas</p>
                 </div>
-              ))}
-            </div>
+                
+                {showHistory ? <ChevronUp className="text-gray-400"/> : <ChevronDown className="text-gray-400"/>}
+            </button>
+
+            {/* LISTA EXPANSÍVEL */}
+            {showHistory && (
+                <div className="space-y-2 mt-3 animate-in slide-in-from-top-2 fade-in duration-300">
+                  {historyInvoices.map(inv => (
+                    <div key={inv.id} className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-gray-200 dark:border-slate-700 flex justify-between items-center opacity-80 hover:opacity-100 transition-opacity">
+                      <div>
+                        <div className="font-medium text-gray-800 dark:text-white">NF {inv.number}</div>
+                        <div className="text-xs text-gray-500 dark:text-slate-400 line-clamp-1 max-w-[200px]">{inv.customer_name}</div>
+                      </div>
+                      
+                      <div className="text-right">
+                          {inv.status === DeliveryStatus.DELIVERED ? (
+                            <span className="text-green-600 dark:text-green-400 flex items-center justify-end gap-1 text-xs font-bold bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded">
+                                <CheckCircle size={12}/> Entregue
+                            </span>
+                          ) : (
+                            <span className="text-red-500 dark:text-red-400 flex items-center justify-end gap-1 text-xs font-bold bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
+                                <XCircle size={12}/> Falhou
+                            </span>
+                          )}
+                          <span className="text-[10px] text-gray-400 block mt-1">
+                              {/* Mostra hora se existir, senão data */}
+                              {inv.delivered_at ? new Date(inv.delivered_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : 'Data N/A'}
+                          </span>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* Fim da Lista */}
+                  <div className="text-center p-2 text-xs text-gray-400">
+                      Fim do histórico recente
+                  </div>
+                </div>
+            )}
           </div>
         )}
       </div>
@@ -463,86 +502,107 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
   };
 
   const submitDelivery = async (success: boolean, reasonOverride?: string) => {
-    // Validações
+    // 1. Validação de Rota
     if (!routeStarted) {
-        notify("⚠️ ATENÇÃO: ROTA NÃO INICIADA!\n\nVocê precisa clicar no botão 'INICIAR ROTA' na tela anterior para ativar o GPS.");
+        notify("Atenção", "Inicie a rota antes de realizar ações.", "WARNING");
         return;
     }
 
+    // 2. Validações de Sucesso
     if (success) {
       if (!signature && !photo) {
-        notify("É necessário pelo menos uma Assinatura ou Foto para comprovar a entrega.");
+        notify("Dados Faltando", "Assinatura ou Foto é obrigatória.", "WARNING");
         return;
       }
       if (!receiverName) {
-         notify("Nome do recebedor é obrigatório.");
-         return;
+        notify("Dados Faltando", "Informe o nome do recebedor.", "WARNING");
+        return;
       }
-    } else {
-      // Validação de Falha (Motivo)
+    } 
+    // 3. Validações de Devolução
+    else {
       const reasonToCheck = reasonOverride || failureReason;
-      if (!reasonToCheck) return notify("Informe o motivo da devolução.");
+      if (!reasonToCheck) {
+        notify("Motivo Obrigatório", "Informe o motivo da devolução.", "WARNING");
+        return;
+      }
+
+      if (returnType === 'PARTIAL') {
+          let hasContent = false;
+          if (invoice.items && invoice.items.length > 0) {
+             const selectedObjs = invoice.items.filter(i => selectedReturnItems.includes(i.code));
+             if (selectedObjs.length > 0) hasContent = true;
+          }
+          
+          if (!hasContent && !returnItems.trim()) {
+              if (invoice.items && invoice.items.length > 0) {
+                  notify("Seleção Necessária", "Selecione os itens devolvidos.", "WARNING");
+              } else {
+                  notify("Descrição Necessária", "Digite quais itens voltaram.", "WARNING");
+              }
+              return;
+          }
+      }
     }
 
     setLoading(true);
 
     try {
-        // 👇 PREPARA O TEXTO DOS ITENS 👇
-        let finalReturnItemsString = returnItems; // Padrão: texto manual
+        let finalReturnItemsString = returnItems;
+        let calculatedLoss = 0; // Começa com zero
 
-        if (!success && returnType === 'PARTIAL' && invoice.items && invoice.items.length > 0) {
-            // Pega apenas os itens que o motorista clicou (ID está no array selectedReturnItems)
-            const selectedObjs = invoice.items.filter(i => selectedReturnItems.includes(i.code));
-            
-            // Monta o texto: "[CODIGO] NOME (QTD UN)"
-            finalReturnItemsString = selectedObjs
-                .map(i => `[${i.code}] ${i.name} (${i.quantity} ${i.unit})`)
-                .join('\n');
-        }
+        if (!success) {
+            const invoiceTotal = Number(invoice.value) || 0;
 
-        // Verifica se o texto final ficou vazio.
-        if (!success && returnType === 'PARTIAL' && !finalReturnItemsString.trim()) {
-            setLoading(false);
-            if (invoice.items && invoice.items.length > 0) {
-                return notify("⚠️ Selecione pelo menos um item na lista de produtos.");
-            } else {
-                return notify("⚠️ Digite quais itens foram devolvidos.");
+            // LÓGICA DE CÁLCULO ATUALIZADA
+            if (returnType === 'PARTIAL' && invoice.items && invoice.items.length > 0) {
+                // 1. Pega os objetos selecionados
+                const selectedObjs = invoice.items.filter(i => selectedReturnItems.includes(i.code));
+                
+                // 2. Monta o texto com o valor unitário (NOVO)
+                finalReturnItemsString = selectedObjs
+                    .map(i => `[${i.code}] ${i.name} (${Number(i.quantity).toFixed(0)} ${i.unit}) - R$ ${Number(i.value).toFixed(2)}`)
+                    .join('\n');
+                
+                // 3. Soma o valor dos itens selecionados (NOVO)
+                calculatedLoss = selectedObjs.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+            } 
+            else if (returnType === 'TOTAL') {
+                 calculatedLoss = invoiceTotal;
+                 finalReturnItemsString = "[TOTAL] Devolução completa da nota.";
             }
         }
-        // 👆 FIM DA PREPARAÇÃO 👆
-
-      const proof: DeliveryProof = {
-        invoice_id: invoice.id,
-        receiver_name: success ? receiverName : 'N/A',
-        receiver_doc: success ? receiverDoc : 'N/A',
-        signature_data: success ? signature : '',
-        photo_url: success ? photo : '',
-        photo_stub_url: success ? photoStub : '',
-
-        // --- DADOS DE DEVOLUÇÃO ---
-        return_type: success ? undefined : returnType,
         
-        // 🚨 CORREÇÃO IMPORTANTE AQUI:
-        // Use 'finalReturnItemsString' em vez de 'returnItems'
-        return_items: success ? undefined : finalReturnItemsString, 
+        if (!success && returnType === 'PARTIAL' && !finalReturnItemsString.trim()) {
+             setLoading(false);
+             notify("Erro", "Não foi possível identificar itens devolvidos.", "WARNING");
+             return;
+        }
+
+        const proof: DeliveryProof = {
+            invoice_id: invoice.id,
+            receiver_name: success ? receiverName : 'N/A',
+            receiver_doc: success ? receiverDoc : 'N/A',
+            signature_data: success ? signature : '',
+            photo_url: success ? photo : '',
+            photo_stub_url: success ? photoStub : '',
+            return_type: success ? undefined : returnType,
+            return_items: success ? undefined : finalReturnItemsString,
+            failure_reason: success ? undefined : (reasonOverride || failureReason),
+            geo_lat: frozenGeo?.lat || null,
+            geo_long: frozenGeo?.lng || null,
+            delivered_at: new Date().toISOString(),
+        };
+
+        // Salva passando o valor calculado
+        await db.saveProof(proof, calculatedLoss);
         
-        failure_reason: success ? undefined : (reasonOverride || failureReason),
-        // -------------------------
-
-        geo_lat: frozenGeo?.lat || null,
-        geo_long: frozenGeo?.lng || null,
-        delivered_at: new Date().toISOString(),
-      };
-
-      await db.saveProof(proof);
-      
-      // ✅ AQUI É O LUGAR CORRETO DO SUCCESS
-      // Só executa se o db.saveProof não der erro
-      setStep('SUCCESS'); 
+        notify("Sucesso", "Informações enviadas.", "SUCCESS");
+        setStep('SUCCESS');
 
     } catch (e) {
-      notify("Erro ao salvar. Tente novamente.");
       console.error(e);
+      notify("Erro no Envio", "Falha ao salvar. Verifique sua conexão.", "WARNING");
     } finally {
       setLoading(false);
     }

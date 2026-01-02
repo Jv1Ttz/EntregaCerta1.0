@@ -108,15 +108,41 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
   // 3. MÉTRICAS FINANCEIRAS E OPERACIONAIS (Baseadas no filtro acima)
   
-  // R$ Total Entregue (Sucesso)
-  const totalDeliveredValue = dashboardData
-    .filter(i => i.status === 'DELIVERED')
-    .reduce((acc, inv) => acc + inv.value, 0);
-
-  // R$ Total Devolvido (Falha)
+    // 3. MÉTRICAS FINANCEIRAS E OPERACIONAIS (Atualizado)
+  
+  // R$ Total Devolvido (Prejuízo Real)
   const totalFailedValue = dashboardData
     .filter(i => i.status === 'FAILED')
-    .reduce((acc, inv) => acc + inv.value, 0);
+    .reduce((acc, inv) => {
+        // LÓGICA INTELIGENTE:
+        // 1. Se existe 'return_value' no banco, usa ele (Cálculo preciso dos itens).
+        // 2. Se não existe (notas antigas), assume que perdeu o valor total da nota.
+        const actualLoss = (inv.return_value !== undefined && inv.return_value !== null)
+            ? Number(inv.return_value)
+            : inv.value;
+            
+        return acc + actualLoss;
+    }, 0);
+
+  // R$ Total Entregue (Sucesso Total + A parte "boa" das devoluções parciais)
+  const totalDeliveredValue = dashboardData.reduce((acc, inv) => {
+      // Cenário 1: Entregue 100%
+      if (inv.status === 'DELIVERED') {
+          return acc + Number(inv.value);
+      } 
+      // Cenário 2: Devolução Parcial (A diferença conta como entregue!)
+      else if (inv.status === 'FAILED') {
+          const loss = (inv.return_value !== undefined && inv.return_value !== null)
+              ? Number(inv.return_value)
+              : inv.value; // Se não tem dado, considera perda total
+          
+          // Ex: Nota de 1000, Perdeu 200. Então Entregou 800.
+          const partialSuccess = Number(inv.value) - loss;
+          // Garante que não some negativo
+          return acc + Math.max(0, partialSuccess);
+      }
+      return acc;
+  }, 0);
 
   // Contagens Simples
   const countPending = dashboardData.filter(i => i.status === 'PENDING').length;

@@ -151,11 +151,32 @@ export const db = {
     }
   },
   
-  saveProof: async (proof: DeliveryProof) => {
+  // ATUALIZADA: Agora aceita o segundo argumento 'invoiceValueLoss'
+  saveProof: async (proof: DeliveryProof, invoiceValueLoss?: number) => {
     const { error } = await supabase.from('delivery_proofs').insert(proof);
+    
     if (!error) {
-       const newStatus = proof.failure_reason ? DeliveryStatus.FAILED : DeliveryStatus.DELIVERED;
-       await supabase.from('invoices').update({ status: newStatus }).eq('id', proof.invoice_id);
+       // Se tem motivo de falha, é FAILED. Se não, é DELIVERED.
+       const isFailure = !!proof.failure_reason;
+       const newStatus = isFailure ? DeliveryStatus.FAILED : DeliveryStatus.DELIVERED;
+       
+       const updates: any = { 
+           status: newStatus,
+           delivered_at: proof.delivered_at
+       };
+
+       // Lógica Financeira do Prejuízo
+       if (isFailure) {
+           // Se veio um valor de perda calculado, salva ele. Senão, 0.
+           updates.return_value = invoiceValueLoss !== undefined ? invoiceValueLoss : 0;
+       } else {
+           // Sucesso = Prejuízo Zero
+           updates.return_value = 0;
+       }
+
+       await supabase.from('invoices').update(updates).eq('id', proof.invoice_id);
+    } else {
+        throw error; // Lança o erro para o DriverView pegar no catch
     }
   },
 
