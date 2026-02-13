@@ -55,6 +55,8 @@ export interface Invoice {
   return_finalized_at?: string | null;
   /** Observação do gestor quando encerra a devolução (opcional) */
   return_final_note?: string | null;
+  /** Link público para PDF (DANFE) — opcional, salvo pelo n8n/Drive */
+  pdf_url?: string | null;
 }
 
 export interface DeliveryProof {

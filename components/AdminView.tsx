@@ -1178,7 +1178,7 @@ const requestSort = (key: string) => {
 
       {/* Header */}
       <header className="bg-slate-900 dark:bg-black text-white p-4 shadow-md sticky top-0 z-30 border-b border-slate-700">
-        <div className="container mx-auto flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Truck className="h-6 w-6 text-blue-400" />
             <h1 className="text-xl font-bold tracking-tight">EntregaCerta <span className="text-slate-400 font-normal">| Gestão</span></h1>
@@ -1210,7 +1210,7 @@ const requestSort = (key: string) => {
         </div>
       </header>
 
-      <main className="container mx-auto p-4 md:p-8 space-y-6">
+      <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
         
        
 
@@ -1835,14 +1835,25 @@ const requestSort = (key: string) => {
                              </button>
                          )}
 
-                          {/* Visualizar Comprovante / Pendência (Olho Azul) 👁️ */}
+                         {/* Visualizar Comprovante / Pendência (Olho Azul) 👁️ */}
                           {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
                             <button
-                              onClick={() => handleViewProof(inv)}
+                              onClick={(e) => { e.stopPropagation(); handleViewProof(inv); }}
                               className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30"
                               title="Ver Detalhes / Comprovante"
                             >
                               <Eye size={18} />
+                            </button>
+                          )}
+
+                          {/* Botão PDF (abre link em nova aba) */}
+                          {inv.pdf_url && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); window.open(inv.pdf_url, '_blank'); }}
+                              className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20"
+                              title="Visualizar PDF da Nota"
+                            >
+                              <FileText size={18} />
                             </button>
                           )}
                          
@@ -1855,26 +1866,7 @@ const requestSort = (key: string) => {
                            <Trash2 size={18} />
                          </button>
 
-                         {/* Botão Mágico SEFAZ (Novo) */}
-                              <button
-                                 onClick={(e) => {
-                                    e.stopPropagation(); // Evita abrir outros modais se houver clique na linha
-                                    
-                                    if (!inv.access_key) {
-                                       alert("Esta nota não possui Chave de Acesso cadastrada.");
-                                       return;
-                                    }
-
-                                    // Copia e Redireciona
-                                    navigator.clipboard.writeText(inv.access_key);
-                                    alert("Chave copiada! Cole (Ctrl+V) no site da SEFAZ.");
-                                    window.open("https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=XbSeqxE8pl8=", "_blank");
-                                 }}
-                                 className="p-2 text-slate-400 hover:text-blue-600 rounded-lg transition-colors"
-                                 title="Copiar Chave e Abrir SEFAZ"
-                              >
-                                 <ExternalLink size={18} />
-                              </button>
+                         
 
                         </div>
                       </td>
