@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Seus estilos customizados (opcional) */
+body {
+  @apply antialiased;
+}
+
+/* ... (resto do seu css) ... */
+
+/* ... resto do seu css normal ... */
+
+@media print {
+  /* 1. Mata a rolagem e limita o tamanho da página para evitar folha em branco extra */
+  html, body {
+    height: 100vh; /* Trava a altura */
+    overflow: hidden !important; /* Esconde o que passar */
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  /* 2. Esconde TUDO no site */
+  body * {
+    visibility: hidden;
+  }
+
+  /* 3. Mostra SÓ o comprovante e garante que ele caiba na folha */
+  #printable-proof, #printable-proof * {
+    visibility: visible;
+  }
+
+  #printable-proof {
+    position: fixed; /* Mudei de absolute para fixed (ajuda na folha extra) */
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    background: white !important; /* Fundo branco garantido */
+    box-shadow: none !important;
+    border: none !important;
+    z-index: 9999;
+  }
+
+  /* 4. CORREÇÃO DO DARK MODE (O Pulo do Gato 🐈‍⬛) */
+  /* Força TODAS as letras a serem pretas na impressão, ignorando o tema */
+  #printable-proof * {
+    color: black !important;
+    text-shadow: none !important;
+  }
+
+  /* 5. Exceção: Se tiver algum fundo colorido (tipo o cabeçalho verde/vermelho),
+     a gente permite texto branco para dar leitura */
+  #printable-proof .bg-green-600 *, 
+  #printable-proof .bg-red-600 * {
+    color: white !important; 
+  }
+
+  /* 6. Esconde botões na hora do papel */
+  .no-print {
+    display: none !important;
+    
+  }
+  
+}

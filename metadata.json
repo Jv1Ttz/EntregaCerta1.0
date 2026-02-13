@@ -1,0 +1,9 @@
+{
+  "name": "EntregaCerta",
+  "description": "Digital proof of delivery system for logistics, featuring NF-e management, digital signatures, and geolocation tracking.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
