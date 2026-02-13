@@ -247,6 +247,19 @@ const [sortConfig, setSortConfig] = useState<{
         if (fleetIntervalRef.current) clearInterval(fleetIntervalRef.current);
     };
   }, []);
+  
+  // Ao montar o componente, se não houver filtro de período definido,
+  // inicializa o dashboard para o mês corrente (útil para gestores/admin).
+  useEffect(() => {
+    if (!dashStartDate && !dashEndDate) {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0,10);
+      setDashStartDate(start);
+      setDashEndDate(end);
+    }
+    // Executa apenas uma vez ao montar
+  }, []);
 
   useEffect(() => {
     if (showScanner) {
@@ -1434,7 +1447,7 @@ const requestSort = (key: string) => {
 
         {/* Invoices Table */}
        {/* --- TABELA DE GESTÃO COM FILTROS AVANÇADOS --- */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[calc(100vh-80px)]"> 
+        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[calc(100vh-80px)] text-sm"> 
           {/* h-[calc...] faz a tabela ocupar o resto da tela sem ser infinita */}
 
           {/* CABEÇALHO E FILTROS */}
