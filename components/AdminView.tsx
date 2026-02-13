@@ -9,8 +9,13 @@ import { ToastContainer } from './ui/Toast';
 import Map, { Marker, NavigationControl, FullscreenControl } from 'react-map-gl';
 import type { MapRef } from 'react-map-gl';
 
+import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css'; // Importante para o mapa não quebrar!
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
+
+// Token lido da env (Vite). Nunca commit este token.
+const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
+mapboxgl.accessToken = MAPBOX_TOKEN;
+mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
 interface AdminViewProps {
   toggleTheme?: () => void;
