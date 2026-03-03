@@ -155,6 +155,10 @@ export const db = {
     await supabase.from('vehicles').insert(vehicle);
   },
 
+  updateVehicle: async (vehicleId: string, updates: Partial<Vehicle>) => {
+    await supabase.from('vehicles').update(updates).eq('id', vehicleId);
+  },
+
   deleteVehicle: async (vehicleId: string) => {
     const { error } = await supabase.from('vehicles').delete().eq('id', vehicleId);
     if (!error) {
@@ -163,8 +167,38 @@ export const db = {
   },
 
   getInvoices: async (): Promise<Invoice[]> => {
-    const { data } = await supabase.from('invoices').select('*');
-    return (data as Invoice[]) || [];
+    // Busca TODAS as notas (sem limite de data) em múltiplos lotes,
+    // para contornar o limite de ~1000 linhas por requisição do PostgREST.
+    const pageSize = 500; // cada chamada traz até 500 registros
+    let all: Invoice[] = [];
+    let from = 0;
+
+    while (true) {
+      const to = from + pageSize - 1;
+
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (error) {
+        console.error('Erro ao buscar invoices:', error);
+        break;
+      }
+
+      const batch = (data as Invoice[]) || [];
+      all = all.concat(batch);
+
+      // Se veio menos que o tamanho da página, não há mais registros
+      if (batch.length < pageSize) {
+        break;
+      }
+
+      from += pageSize;
+    }
+
+    return all;
   },
 
   getInvoicesByDriver: async (driverId: string): Promise<Invoice[]> => {

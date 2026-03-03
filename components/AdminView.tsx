@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 
@@ -39,6 +39,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   
   const [showAddDriver, setShowAddDriver] = useState(false);
   const [showAddVehicle, setShowAddVehicle] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [newVehicleTara, setNewVehicleTara] = useState<string>('');
+  const [newVehicleCubagem, setNewVehicleCubagem] = useState<string>('');
+  const [newVehicleMaxWeight, setNewVehicleMaxWeight] = useState<string>('');
   const [showFleetMonitor, setShowFleetMonitor] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -95,15 +99,25 @@ const [sortConfig, setSortConfig] = useState<{
 
 
   // --- NOVOS ESTADOS DE FILTRO ---
+  // Tabela: começa sem filtro de data (mostra todas as notas)
+  // Dashboard: usa sempre o mês corrente (1º ao último dia)
+  const getCurrentMonthRange = () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+    return { start, end };
+  };
+  const { start: monthStartStr, end: monthEndStr } = getCurrentMonthRange();
+
   const [filterDriver, setFilterDriver] = useState('');
   const [filterVehicle, setFilterVehicle] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');  // vazio = sem filtro na tabela
   const [filterEndDate, setFilterEndDate] = useState('');
 
-// 1. ESTADOS DO FILTRO DE DATA
-  const [dashStartDate, setDashStartDate] = useState('');
-  const [dashEndDate, setDashEndDate] = useState('');
+  // Filtro do Dashboard: sempre mês corrente
+  const [dashStartDate, setDashStartDate] = useState(monthStartStr);
+  const [dashEndDate, setDashEndDate] = useState(monthEndStr);
   const [filterDeliveryStartDate, setFilterDeliveryStartDate] = useState('');
   const [filterDeliveryEndDate, setFilterDeliveryEndDate] = useState('');
 
@@ -111,10 +125,32 @@ const [sortConfig, setSortConfig] = useState<{
   const [modalEditValue, setModalEditValue] = useState<{open: boolean, invoice: Invoice | null, value: string}>({ open: false, invoice: null, value: '' });
   // Modal para finalizar devolução (concluir / cancelar)
   const [modalFinalize, setModalFinalize] = useState<{ open: boolean; invoice: Invoice | null; outcome: 'CONCLUDED' | 'CANCELLED' | null; note: string; loading?: boolean }>({ open: false, invoice: null, outcome: null, note: '', loading: false });
+  const [openActionsRow, setOpenActionsRow] = useState<string | null>(null);
 
   // ... outros useEffects ...
 
-  
+  // Calcula carga atual (peso/volume) de um veículo considerando as notas atribuídas
+  const calculateVehicleLoad = (vehicleId: string, sourceInvoices: Invoice[] = invoices) => {
+    const vehicle = vehicles.find(v => v.id === vehicleId);
+    if (!vehicle) return null;
+
+    // Se não tiver NENHUMA informação de capacidade, ignoramos qualquer alerta
+    if (vehicle.tara == null && vehicle.cubagem == null && vehicle.max_weight == null) return null;
+
+    const assigned = sourceInvoices.filter(inv => inv.vehicle_id === vehicleId);
+
+    const totalWeight = assigned.reduce(
+      (sum, inv) => sum + (inv.cargo_weight_gross || 0),
+      0
+    );
+
+    const totalVolume = assigned.reduce(
+      (sum, inv) => sum + (inv.cargo_volume_count || 0),
+      0
+    );
+
+    return { vehicle, totalWeight, totalVolume };
+  };
 
   // 👇 BLOQUEIO DE SCROLL DO BODY QUANDO MODAL ABRE 👇
   useEffect(() => {
@@ -248,18 +284,7 @@ const [sortConfig, setSortConfig] = useState<{
     };
   }, []);
   
-  // Ao montar o componente, se não houver filtro de período definido,
-  // inicializa o dashboard para o mês corrente (útil para gestores/admin).
-  useEffect(() => {
-    if (!dashStartDate && !dashEndDate) {
-      const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0,10);
-      setDashStartDate(start);
-      setDashEndDate(end);
-    }
-    // Executa apenas uma vez ao montar
-  }, []);
+  // Dashboard já inicializa com mês corrente via useState; sem useEffect extra.
 
   useEffect(() => {
     if (showScanner) {
@@ -328,17 +353,17 @@ const [sortConfig, setSortConfig] = useState<{
 
   const refreshData = async () => {
     try {
-        const [inv, drv, veh] = await Promise.all([
-            db.getInvoices(),
-            db.getDrivers(),
-            db.getVehicles()
-        ]);
-        setInvoices(inv);
-        setDrivers(drv);
-        setVehicles(veh);
-        setLastUpdate(new Date());
+      const [inv, drv, veh] = await Promise.all([
+        db.getInvoices(),
+        db.getDrivers(),
+        db.getVehicles()
+      ]);
+      setInvoices(inv);
+      setDrivers(drv);
+      setVehicles(veh);
+      setLastUpdate(new Date());
     } catch (e) {
-        console.error("Erro ao atualizar dados:", e);
+      console.error("Erro ao atualizar dados:", e);
     }
   };
 
@@ -552,6 +577,32 @@ const [sortConfig, setSortConfig] = useState<{
             const entregaTag = xmlDoc.getElementsByTagName("entrega")[0];
             const addressSource = entregaTag ? entregaTag : enderDest;
 
+            // Dados de transporte / volumes (peso, quantidade de volumes, tipo de embalagem)
+            const transp = xmlDoc.getElementsByTagName("transp")[0];
+            const volTags = transp?.getElementsByTagName("vol") ?? [];
+
+            let cargoVolumeCount = 0;
+            let cargoWeightNet = 0;
+            let cargoWeightGross = 0;
+            let cargoVolumeType: string | null = null;
+
+            for (let i = 0; i < volTags.length; i++) {
+              const vol = volTags[i];
+
+              const qVolStr = getValue("qVol", vol);
+              const pesoLStr = getValue("pesoL", vol);
+              const pesoBStr = getValue("pesoB", vol);
+              const esp = getValue("esp", vol);
+
+              cargoVolumeCount += parseFloat(qVolStr || "0");
+              cargoWeightNet += parseFloat(pesoLStr || "0");
+              cargoWeightGross += parseFloat(pesoBStr || "0");
+
+              if (!cargoVolumeType && esp) {
+                cargoVolumeType = esp;
+              }
+            }
+
             // Dados Adicionais
             const infAdic = xmlDoc.getElementsByTagName("infAdic")[0];
             const infCpl = getValue("infCpl", infAdic); 
@@ -635,6 +686,10 @@ const [sortConfig, setSortConfig] = useState<{
                   driver_id: null,
                   vehicle_id: null,
                   created_at: new Date().toISOString(),
+                  cargo_volume_count: cargoVolumeCount || undefined,
+                  cargo_volume_type: cargoVolumeType ?? null,
+                  cargo_weight_net: cargoWeightNet || undefined,
+                  cargo_weight_gross: cargoWeightGross || undefined,
                   items: extractedItems
                 });
                 results.success++;
@@ -676,6 +731,61 @@ const [sortConfig, setSortConfig] = useState<{
         return i;
     });
     setInvoices(updatedInvoices);
+
+    // Se for alteração de veículo, checamos capacidade e, se aplicável, avisamos o gestor
+    if (field === 'vehicle' && value) {
+      const loadInfo = calculateVehicleLoad(value, updatedInvoices);
+      if (loadInfo) {
+        const { vehicle, totalWeight, totalVolume } = loadInfo;
+        const estimatedTotalWeight = (vehicle.tara || 0) + totalWeight;
+
+        // 1) Alerta por cubagem (somatório de volumes)
+        if (vehicle.cubagem && totalVolume > vehicle.cubagem) {
+          const message = `Veículo ${vehicle.plate} — Tara: ${vehicle.tara ?? 'n/d'} kg, carga estimada: ${totalWeight.toFixed(
+            2
+          )} kg (total aproximado: ${estimatedTotalWeight.toFixed(
+            2
+          )} kg). Atenção: a soma dos volumes (${totalVolume.toFixed(
+            2
+          )}) ultrapassa a cubagem cadastrada (${vehicle.cubagem} m³).`;
+
+          setNotifications(prev => [
+            ...prev,
+            {
+              id: `capacity-cubagem-${invoiceId}-${Date.now()}`,
+              recipient_id: 'ADMIN',
+              title: 'Alerta de cubagem do veículo',
+              message,
+              type: 'WARNING',
+              read: false,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
+
+        // 2) Alerta por peso máximo (PBT / lotação)
+        if (vehicle.tara != null && vehicle.max_weight != null && estimatedTotalWeight > vehicle.max_weight) {
+          const message = `Veículo ${vehicle.plate} — Peso total estimado ${estimatedTotalWeight.toFixed(
+            2
+          )} kg (Tara: ${vehicle.tara} kg + carga: ${totalWeight.toFixed(
+            2
+          )} kg) ultrapassa o peso máximo permitido (${vehicle.max_weight} kg).`;
+
+          setNotifications(prev => [
+            ...prev,
+            {
+              id: `capacity-peso-${invoiceId}-${Date.now()}`,
+              recipient_id: 'ADMIN',
+              title: 'Alerta de peso máximo do veículo',
+              message,
+              type: 'WARNING',
+              read: false,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
+      }
+    }
 
     const newDriverId = field === 'driver' ? value : inv.driver_id;
     const newVehicleId = field === 'vehicle' ? value : inv.vehicle_id;
@@ -808,6 +918,68 @@ const requestSort = (key: string) => {
     });
 
     await Promise.all(promises);
+    // Antes de recarregar os dados, simulamos como ficará a alocação para checar capacidade
+    if (bulkVehicle) {
+      const simulatedInvoices = invoices.map(inv => {
+        if (selectedInvoiceIds.has(inv.id)) {
+          return { ...inv, vehicle_id: bulkVehicle || inv.vehicle_id };
+        }
+        return inv;
+      });
+
+      const loadInfo = calculateVehicleLoad(bulkVehicle, simulatedInvoices);
+      if (loadInfo) {
+        const { vehicle, totalWeight, totalVolume } = loadInfo;
+        const estimatedTotalWeight = (vehicle.tara || 0) + totalWeight;
+
+        // 1) Alerta por cubagem (somatório de volumes)
+        if (vehicle.cubagem && totalVolume > vehicle.cubagem) {
+          const message = `Veículo ${vehicle.plate} — Tara: ${vehicle.tara ?? 'n/d'} kg, carga estimada: ${totalWeight.toFixed(
+            2
+          )} kg (total aproximado: ${estimatedTotalWeight.toFixed(
+            2
+          )} kg). Atenção: a soma dos volumes (${totalVolume.toFixed(
+            2
+          )}) ultrapassa a cubagem cadastrada (${vehicle.cubagem} m³).`;
+
+          setNotifications(prev => [
+            ...prev,
+            {
+              id: `capacity-bulk-cubagem-${bulkVehicle}-${Date.now()}`,
+              recipient_id: 'ADMIN',
+              title: 'Alerta de cubagem do veículo',
+              message,
+              type: 'WARNING',
+              read: false,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
+
+        // 2) Alerta por peso máximo (PBT / lotação)
+        if (vehicle.tara != null && vehicle.max_weight != null && estimatedTotalWeight > vehicle.max_weight) {
+          const message = `Veículo ${vehicle.plate} — Peso total estimado ${estimatedTotalWeight.toFixed(
+            2
+          )} kg (Tara: ${vehicle.tara} kg + carga: ${totalWeight.toFixed(
+            2
+          )} kg) ultrapassa o peso máximo permitido (${vehicle.max_weight} kg).`;
+
+          setNotifications(prev => [
+            ...prev,
+            {
+              id: `capacity-bulk-peso-${bulkVehicle}-${Date.now()}`,
+              recipient_id: 'ADMIN',
+              title: 'Alerta de peso máximo do veículo',
+              message,
+              type: 'WARNING',
+              read: false,
+              timestamp: new Date().toISOString()
+            }
+          ]);
+        }
+      }
+    }
+
     refreshData();
     
     // Limpa a seleção
@@ -896,17 +1068,39 @@ const requestSort = (key: string) => {
     e.preventDefault();
     if (newVehiclePlate && newVehicleModel) {
       try {
-        await db.addVehicle({
-          id: `v-${Date.now()}`,
-          plate: newVehiclePlate.toUpperCase(),
-          model: newVehicleModel
-        });
+        const taraValue = newVehicleTara ? parseFloat(newVehicleTara.replace(',', '.')) : null;
+        const cubagemValue = newVehicleCubagem ? parseFloat(newVehicleCubagem.replace(',', '.')) : null;
+        const maxWeightValue = newVehicleMaxWeight ? parseFloat(newVehicleMaxWeight.replace(',', '.')) : null;
+
+        if (editingVehicleId) {
+          await db.updateVehicle(editingVehicleId, {
+            plate: newVehiclePlate.toUpperCase(),
+            model: newVehicleModel,
+            tara: taraValue ?? undefined,
+            cubagem: cubagemValue ?? undefined,
+            max_weight: maxWeightValue ?? undefined
+          });
+        } else {
+          await db.addVehicle({
+            id: `v-${Date.now()}`,
+            plate: newVehiclePlate.toUpperCase(),
+            model: newVehicleModel,
+            tara: taraValue ?? undefined,
+            cubagem: cubagemValue ?? undefined,
+            max_weight: maxWeightValue ?? undefined
+          });
+        }
+
         setNewVehiclePlate('');
         setNewVehicleModel('');
+        setNewVehicleTara('');
+        setNewVehicleCubagem('');
+        setNewVehicleMaxWeight('');
+        setEditingVehicleId(null);
         refreshData();
       } catch (error) {
         console.error(error);
-        alert("Erro ao cadastrar veículo.");
+        alert(editingVehicleId ? "Erro ao atualizar veículo." : "Erro ao cadastrar veículo.");
       }
     }
   };
@@ -1790,84 +1984,92 @@ const requestSort = (key: string) => {
                       </td>
 
                       <td className="px-6 py-4 text-right">
-                        <div className="flex justify-end gap-2">
-                         
-                         {/* BOTÃO DE REENTREGA (só para FAILED com devolução ainda aberta) 🔄 */}
-                         {inv.status === 'FAILED' && !inv.return_final_status && (
-                             <button
-                               onClick={() => handleRedeliver(inv)}
-                               className="text-purple-500 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 transition-colors p-2 rounded-full hover:bg-purple-50 dark:hover:bg-purple-900/30"
-                               title="Disponibilizar para Reentrega"
-                             >
-                               <RefreshCw size={18} />
-                             </button>
-                         )}
-                         {/* Concluir devolução (encerra fluxo, não volta para motorista) */}
-                        {inv.status === 'FAILED' && !inv.return_final_status && (
-                            <button
-                              onClick={() => openFinalizeModal(inv, 'CONCLUDED')}
-                              className="text-emerald-500 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 transition-colors p-2 rounded-full hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
-                              title="Concluir devolução (encerrar fluxo)"
-                            >
-                              <CheckCircle size={18} />
-                            </button>
-                        )}
-                         {/* Cancelar devolução (cliente desistiu) */}
-                        {inv.status === 'FAILED' && !inv.return_final_status && (
-                            <button
-                              onClick={() => openFinalizeModal(inv, 'CANCELLED')}
-                              className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 transition-colors p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
-                              title="Cancelar devolução (cliente desistiu)"
-                            >
-                              <XCircle size={18} />
-                            </button>
-                        )}
+                        <div className="relative inline-block text-left">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenActionsRow((prev) => (prev === inv.id ? null : inv.id));
+                            }}
+                            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                            title="Mais ações"
+                          >
+                            <MoreVertical size={18} />
+                          </button>
 
-                         {/* BOTÃO DE EDITAR VALOR (Só para Reentregas) 💲 */}
-                         {/* Mostra só se for PENDING e tiver tentativas registradas (> 0) */}
-                         {inv.status === 'PENDING' && (inv.delivery_attempts || 0) > 0 && (
-                             <button
-                               onClick={() => handleEditValue(inv)}
-                               className="text-slate-400 hover:text-green-600 dark:hover:text-green-400 transition-colors p-2 rounded-full hover:bg-green-50 dark:hover:bg-green-900/30"
-                               title={`Editar Valor de Reentrega (Atual: R$ ${inv.value})`}
-                             >
-                               <DollarSign size={18} />
-                             </button>
-                         )}
+                          {openActionsRow === inv.id && (
+                            <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-lg shadow-lg bg-white dark:bg-slate-800 ring-1 ring-black/5 dark:ring-slate-700 z-30">
+                              <div className="py-1 text-sm text-slate-700 dark:text-slate-200">
+                                {/* Ações de Devolução */}
+                                {inv.status === 'FAILED' && !inv.return_final_status && (
+                                  <>
+                                    <button
+                                      onClick={() => handleRedeliver(inv)}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-300"
+                                    >
+                                      <RefreshCw size={16} />
+                                      <span>Disponibilizar para Reentrega</span>
+                                    </button>
+                                    <button
+                                      onClick={() => openFinalizeModal(inv, 'CONCLUDED')}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
+                                    >
+                                      <CheckCircle size={16} />
+                                      <span>Concluir Devolução</span>
+                                    </button>
+                                    <button
+                                      onClick={() => openFinalizeModal(inv, 'CANCELLED')}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                    >
+                                      <XCircle size={16} />
+                                      <span>Cancelar Devolução</span>
+                                    </button>
+                                  </>
+                                )}
 
-                         {/* Visualizar Comprovante / Pendência (Olho Azul) 👁️ */}
-                          {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleViewProof(inv); }}
-                              className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition-colors p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-900/30"
-                              title="Ver Detalhes / Comprovante"
-                            >
-                              <Eye size={18} />
-                            </button>
+                                {/* Reentrega / Financeiro */}
+                                {inv.status === 'PENDING' && (inv.delivery_attempts || 0) > 0 && (
+                                  <button
+                                    onClick={() => handleEditValue(inv)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-green-50 dark:hover:bg-green-900/40 text-green-600 dark:text-green-300"
+                                  >
+                                    <DollarSign size={16} />
+                                    <span>Editar Valor de Reentrega</span>
+                                  </button>
+                                )}
+
+                                {/* Comprovante / Pendência */}
+                                {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
+                                  <button
+                                    onClick={() => handleViewProof(inv)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+                                  >
+                                    <Eye size={16} />
+                                    <span>Ver Detalhes / Comprovante</span>
+                                  </button>
+                                )}
+
+                                {/* PDF da Nota */}
+                                {inv.pdf_url && (
+                                  <button
+                                    onClick={() => window.open(inv.pdf_url, '_blank')}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
+                                  >
+                                    <FileText size={16} />
+                                    <span>Visualizar PDF da Nota</span>
+                                  </button>
+                                )}
+
+                                {/* Excluir */}
+                                <button
+                                  onClick={() => handleDeleteInvoice(inv.id)}
+                                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300 border-t border-slate-100 dark:border-slate-700 mt-1"
+                                >
+                                  <Trash2 size={16} />
+                                  <span>Excluir Nota</span>
+                                </button>
+                              </div>
+                            </div>
                           )}
-
-                          {/* Botão PDF (abre link em nova aba) */}
-                          {inv.pdf_url && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); window.open(inv.pdf_url, '_blank'); }}
-                              className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20"
-                              title="Visualizar PDF da Nota"
-                            >
-                              <FileText size={18} />
-                            </button>
-                          )}
-                         
-                         {/* Botão de Excluir (Lixeira) 🗑️ */}
-                         <button 
-                           onClick={() => handleDeleteInvoice(inv.id)}
-                           className="text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors p-2 rounded-full hover:bg-red-50 dark:hover:bg-red-900/30"
-                           title="Excluir Nota"
-                         >
-                           <Trash2 size={18} />
-                         </button>
-
-                         
-
                         </div>
                       </td>
                     </tr>
@@ -2740,14 +2942,82 @@ const requestSort = (key: string) => {
                  <button onClick={() => setShowAddVehicle(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
               </div>
               
-              <div className="p-6 border-b border-slate-100 dark:border-slate-700 shrink-0">
-                 <h4 className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase">Novo Cadastro</h4>
+            <div className="p-6 border-b border-slate-100 dark:border-slate-700 shrink-0">
+                 <h4 className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase">
+                   {editingVehicleId ? 'Editar Veículo' : 'Novo Cadastro'}
+                 </h4>
                  <form onSubmit={handleCreateVehicle} className="space-y-3">
                     <div className="grid grid-cols-2 gap-2">
-                       <input type="text" required className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="Modelo" value={newVehicleModel} onChange={e => setNewVehicleModel(e.target.value)} />
-                       <input type="text" required className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none uppercase text-sm" placeholder="Placa" value={newVehiclePlate} onChange={e => setNewVehiclePlate(e.target.value)} />
+                       <input
+                         type="text"
+                         required
+                         className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                         placeholder="Modelo"
+                         value={newVehicleModel}
+                         onChange={e => setNewVehicleModel(e.target.value)}
+                       />
+                       <input
+                         type="text"
+                         required
+                         className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none uppercase text-sm"
+                         placeholder="Placa"
+                         value={newVehiclePlate}
+                         onChange={e => setNewVehiclePlate(e.target.value)}
+                       />
                     </div>
-                    <button type="submit" className="w-full bg-blue-600 text-white font-bold py-2 rounded-md hover:bg-blue-700 transition-colors text-sm">Cadastrar</button>
+                    <div className="grid grid-cols-3 gap-2">
+                       <input
+                         type="number"
+                         step="0.01"
+                         min="0"
+                         className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                         placeholder="Tara (kg)"
+                         value={newVehicleTara}
+                         onChange={e => setNewVehicleTara(e.target.value)}
+                       />
+                       <input
+                         type="number"
+                         step="0.01"
+                         min="0"
+                         className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                         placeholder="Cubagem (m³)"
+                         value={newVehicleCubagem}
+                         onChange={e => setNewVehicleCubagem(e.target.value)}
+                       />
+                       <input
+                         type="number"
+                         step="0.01"
+                         min="0"
+                         className="w-full p-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white rounded-md focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                         placeholder="Peso Máx. (kg)"
+                         value={newVehicleMaxWeight}
+                         onChange={e => setNewVehicleMaxWeight(e.target.value)}
+                       />
+                    </div>
+                    <div className="flex gap-2">
+                      {editingVehicleId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingVehicleId(null);
+                            setNewVehiclePlate('');
+                            setNewVehicleModel('');
+                            setNewVehicleTara('');
+                            setNewVehicleCubagem('');
+                            setNewVehicleMaxWeight('');
+                          }}
+                          className="w-1/3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-white font-bold py-2 rounded-md hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors text-sm"
+                        >
+                          Cancelar
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        className="flex-1 bg-blue-600 text-white font-bold py-2 rounded-md hover:bg-blue-700 transition-colors text-sm"
+                      >
+                        {editingVehicleId ? 'Salvar alterações' : 'Cadastrar'}
+                      </button>
+                    </div>
                  </form>
               </div>
 
@@ -2758,18 +3028,46 @@ const requestSort = (key: string) => {
                       <p className="text-center text-gray-400 text-sm italic">Nenhum veículo.</p>
                     ) : (
                       vehicles.map(v => (
-                        <div key={v.id} className="bg-white dark:bg-slate-800 p-3 rounded border border-gray-200 dark:border-slate-600 flex justify-between items-center shadow-sm">
+                        <div
+                          key={v.id}
+                          className="bg-white dark:bg-slate-800 p-3 rounded border border-gray-200 dark:border-slate-600 flex justify-between items-center shadow-sm"
+                        >
                            <div>
-                             <span className="font-bold text-slate-800 dark:text-white uppercase block">{v.plate}</span>
-                             <span className="text-xs text-slate-500 dark:text-slate-400">{v.model}</span>
+                             <span className="font-bold text-slate-800 dark:text-white uppercase block">
+                               {v.plate}
+                             </span>
+                             <span className="text-xs text-slate-500 dark:text-slate-400 block">
+                               {v.model}
+                             </span>
+                             <span className="text-[11px] text-slate-400 dark:text-slate-500 block mt-1">
+                               {v.tara ? `Tara: ${v.tara} kg` : 'Tara não informada'} •{' '}
+                               {v.cubagem ? `Cubagem: ${v.cubagem} m³` : 'Cubagem não informada'} •{' '}
+                               {v.max_weight ? `Peso máx.: ${v.max_weight} kg` : 'Peso máx. não informado'}
+                             </span>
                            </div>
-                           <button 
-                             onClick={() => handleDeleteVehicle(v.id)}
-                             className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                             title="Remover Veículo"
-                           >
+                           <div className="flex items-center gap-2">
+                             <button
+                               onClick={() => {
+                                 setEditingVehicleId(v.id);
+                                 setNewVehiclePlate(v.plate);
+                                 setNewVehicleModel(v.model);
+                                 setNewVehicleTara(v.tara ? String(v.tara) : '');
+                                 setNewVehicleCubagem(v.cubagem ? String(v.cubagem) : '');
+                                 setNewVehicleMaxWeight(v.max_weight ? String(v.max_weight) : '');
+                               }}
+                               className="text-blue-500 hover:text-blue-700 p-1 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded flex items-center justify-center"
+                               title="Editar Veículo"
+                             >
+                               <Pencil size={16} />
+                             </button>
+                             <button 
+                               onClick={() => handleDeleteVehicle(v.id)}
+                               className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                               title="Remover Veículo"
+                             >
                               <Trash2 size={16} />
-                           </button>
+                             </button>
+                           </div>
                         </div>
                       ))
                     )}

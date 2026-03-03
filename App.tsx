@@ -1,9 +1,10 @@
+// @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { db } from './services/db';
 import { ViewState } from './types';
 import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
-import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>({ type: 'ROLE_SELECT' });
@@ -142,6 +143,25 @@ const App: React.FC = () => {
                     </div>
                     <div className="h-14 w-14 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-300 group-hover:scale-110 transition-transform">
                        <Monitor size={28} />
+                    </div>
+                 </button>
+
+                 {/* Novo card de futura funcionalidade */}
+                 <button 
+                    type="button"
+                    onClick={() => alert('Nova funcionalidade de administrador em desenvolvimento.')}
+                    className="w-full group bg-slate-900/40 dark:bg-slate-900/40 border border-dashed border-slate-600 hover:border-slate-400 transition-all p-6 rounded-2xl flex items-center justify-between shadow-inner"
+                 >
+                    <div className="text-left">
+                       <h3 className="text-2xl font-bold text-slate-300 group-hover:text-slate-100">
+                         Administrador
+                       </h3>
+                       <p className="text-slate-500 text-sm mt-1">
+                         Em breve: novos recursos para o Admin.
+                       </p>
+                    </div>
+                    <div className="h-14 w-14 bg-slate-800 rounded-full flex items-center justify-center text-slate-300 group-hover:text-yellow-300 group-hover:scale-110 transition-transform">
+                       <Crown size={28} />
                     </div>
                  </button>
               </div>

@@ -12,6 +12,12 @@ export interface Vehicle {
   id: string;
   plate: string;
   model: string;
+  /** Peso do veículo em vazio (kg) */
+  tara?: number;
+  /** Capacidade volumétrica (m³) ou critério de cubagem definido pela operação */
+  cubagem?: number;
+  /** Peso bruto total máximo permitido (kg) — PBT/lotação total */
+  max_weight?: number;
 }
 
 export interface Driver {
@@ -39,6 +45,14 @@ export interface Invoice {
   driver_id: string | null;
   vehicle_id: string | null; // The vehicle assigned for this specific delivery
   created_at: string;
+  /** Quantidade total de volumes da carga (somatório de <qVol> dos <vol>) */
+  cargo_volume_count?: number;
+  /** Tipo/descrição do volume (primeiro <esp> encontrado em <vol>) */
+  cargo_volume_type?: string | null;
+  /** Peso líquido total da carga (somatório de <pesoL> dos <vol>, em kg) */
+  cargo_weight_net?: number;
+  /** Peso bruto total da carga (somatório de <pesoB> dos <vol>, em kg) */
+  cargo_weight_gross?: number;
   items?: InvoiceItem[];   // Lista de produtos importados
   return_value?: number;
   failure_reason?: string; // Já deve ter
