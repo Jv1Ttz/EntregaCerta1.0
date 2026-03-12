@@ -4,6 +4,7 @@ import { db } from './services/db';
 import { ViewState } from './types';
 import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
+import { AdminAuditView } from './components/AdminAuditView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -149,7 +150,7 @@ const App: React.FC = () => {
                  {/* Novo card de futura funcionalidade */}
                  <button 
                     type="button"
-                    onClick={() => alert('Nova funcionalidade de administrador em desenvolvimento.')}
+                    onClick={() => setView({ type: 'ADMIN_AUDIT' })}
                     className="w-full group bg-slate-900/40 dark:bg-slate-900/40 border border-dashed border-slate-600 hover:border-slate-400 transition-all p-6 rounded-2xl flex items-center justify-between shadow-inner"
                  >
                     <div className="text-left">
@@ -239,6 +240,19 @@ const App: React.FC = () => {
             onSelectDriver={handleDriverLoginAttempt}
             driversListPromise={db.getDrivers()} // Passamos a Promise
           />
+        );
+
+      case 'ADMIN_AUDIT':
+        return (
+          <div className="relative">
+            <AdminAuditView />
+            <button
+              onClick={() => setView({ type: 'ROLE_SELECT' })}
+              className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
+            >
+              Voltar
+            </button>
+          </div>
         );
 
        case 'ADMIN_DASHBOARD':

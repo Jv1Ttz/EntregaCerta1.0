@@ -71,6 +71,12 @@ export interface Invoice {
   return_final_note?: string | null;
   /** Link público para PDF (DANFE) — opcional, salvo pelo n8n/Drive */
   pdf_url?: string | null;
+  /** Soft delete: data/hora em que a nota foi marcada como excluída pelo gestor */
+  deleted_at?: string | null;
+  /** Soft delete: identificador de quem excluiu (por enquanto usamos 'ADMIN') */
+  deleted_by?: string | null;
+  /** Soft delete: motivo da exclusão, se informado */
+  deleted_reason?: string | null;
 }
 
 export interface DeliveryProof {
@@ -112,6 +118,7 @@ export type ViewState =
   | { type: 'ROLE_SELECT' }
   | { type: 'ADMIN_LOGIN' }
   | { type: 'ADMIN_DASHBOARD' }
+  | { type: 'ADMIN_AUDIT' }          // nova tela do Administrador (auditoria / notas excluídas)
   | { type: 'DRIVER_LOGIN' }
   | { type: 'DRIVER_LIST'; driverId: string }
   | { type: 'DRIVER_ACTION'; driverId: string; invoiceId: string };

@@ -179,6 +179,7 @@ export const db = {
       const { data, error } = await supabase
         .from('invoices')
         .select('*')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .range(from, to);
 
@@ -202,7 +203,11 @@ export const db = {
   },
 
   getInvoicesByDriver: async (driverId: string): Promise<Invoice[]> => {
-    const { data } = await supabase.from('invoices').select('*').eq('driver_id', driverId);
+    const { data } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('driver_id', driverId)
+      .is('deleted_at', null);
     return (data as Invoice[]) || [];
   },
 
@@ -228,9 +233,37 @@ export const db = {
     if (error) throw error;
   },
 
-  deleteInvoice: async (invoiceId: string) => {
-    await supabase.from('delivery_proofs').delete().eq('invoice_id', invoiceId);
-    await supabase.from('invoices').delete().eq('id', invoiceId);
+  // Soft delete: marca a nota como excluída, mas mantém o registro para auditoria
+  deleteInvoice: async (invoiceId: string, reason?: string) => {
+    const { error } = await supabase
+      .from('invoices')
+      .update({
+        deleted_at: new Date().toISOString(),
+        deleted_by: 'ADMIN',
+        deleted_reason: reason || null,
+      })
+      .eq('id', invoiceId);
+
+    if (error) {
+      console.error('Erro ao excluir (soft delete) invoice:', error);
+      throw error;
+    }
+  },
+
+  // Lista de notas excluídas (para tela de auditoria do gestor)
+  getDeletedInvoices: async (): Promise<Invoice[]> => {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .not('deleted_at', 'is', null)
+      .order('deleted_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao buscar invoices excluídas:', error);
+      return [];
+    }
+
+    return (data as Invoice[]) || [];
   },
 
 //Trecho que mudei a logica do em rota 👇
