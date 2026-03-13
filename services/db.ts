@@ -397,6 +397,48 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     return data as DeliveryProof || undefined;
   },
 
+  // Baixa manual pelo gestor (sem intervenção do motorista)
+  adminManualSettleInvoice: async (
+    invoiceId: string,
+    options: { status: 'DELIVERED' | 'FAILED'; reason: string; lossValue?: number }
+  ) => {
+    const { status, reason, lossValue } = options;
+
+    const updates: any = {
+      status,
+      delivered_at: new Date().toISOString(),
+    };
+
+    if (status === DeliveryStatus.FAILED) {
+      updates.return_value =
+        typeof lossValue === 'number' && !isNaN(lossValue) ? lossValue : 0;
+      updates.last_failure_reason = `BAIXA MANUAL (GESTOR): ${reason}`;
+    }
+
+    // Para entregas manuais sem falha, apenas registramos o motivo no histórico de falha
+    if (status === DeliveryStatus.DELIVERED) {
+      updates.last_failure_reason = `BAIXA MANUAL (GESTOR): ${reason}`;
+      updates.return_value = 0;
+    }
+
+    const { error } = await supabase
+      .from('invoices')
+      .update(updates)
+      .eq('id', invoiceId);
+
+    if (error) {
+      console.error('Erro na baixa manual:', error);
+      throw error;
+    }
+
+    await db.addNotification(
+      'ADMIN',
+      'Baixa manual aplicada',
+      `NF ${invoiceId} atualizada para ${status} pelo gestor.`,
+      'INFO'
+    );
+  },
+
   verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
     return passwordInput === (import.meta.env.VITE_ADMIN_PASSWORD || ADMIN_PASSWORD_DEFAULT);
   },

@@ -47,6 +47,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   const [showSettings, setShowSettings] = useState(false);
   
   const [viewingProof, setViewingProof] = useState<{invoice: Invoice, proof: DeliveryProof} | null>(null);
+  const [viewingManualProof, setViewingManualProof] = useState<Invoice | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [zoomedScale, setZoomedScale] = useState(1);
 
@@ -126,6 +127,22 @@ const [sortConfig, setSortConfig] = useState<{
   // Modal para finalizar devolução (concluir / cancelar)
   const [modalFinalize, setModalFinalize] = useState<{ open: boolean; invoice: Invoice | null; outcome: 'CONCLUDED' | 'CANCELLED' | null; note: string; loading?: boolean }>({ open: false, invoice: null, outcome: null, note: '', loading: false });
   const [openActionsRow, setOpenActionsRow] = useState<string | null>(null);
+  // Modal de baixa manual (gestor)
+  const [manualSettleModal, setManualSettleModal] = useState<{
+    open: boolean;
+    invoice: Invoice | null;
+    status: 'DELIVERED' | 'FAILED';
+    reason: string;
+    lossValue: string;
+    loading?: boolean;
+  }>({
+    open: false,
+    invoice: null,
+    status: 'DELIVERED',
+    reason: '',
+    lossValue: '',
+    loading: false,
+  });
 
   // ... outros useEffects ...
 
@@ -1022,16 +1039,22 @@ const requestSort = (key: string) => {
   const handleViewProof = async (invoice: Invoice) => {
     const proof = await db.getProofByInvoiceId(invoice.id);
     
+    // Se não houver comprovante salvo, mas houver baixa manual registrada,
+    // abrimos o modal específico de baixa manual (sem foto/assinatura).
     if (!proof) {
+      if (invoice.last_failure_reason && invoice.last_failure_reason.includes('BAIXA MANUAL (GESTOR)')) {
+        setViewingManualProof(invoice);
+        return;
+      }
       alert("Comprovante ainda não sincronizado ou não encontrado.");
       return;
     }
 
-    // AQUI ESTÁ A SEPARAÇÃO INTELIGENTE 👇
+    // Separação inteligente:
     if (invoice.status === 'ISSUE') {
-        setViewingIssue({ invoice, proof }); // Abre o Modal Exclusivo de Pendência
+      setViewingIssue({ invoice, proof }); // Modal exclusivo de pendência
     } else {
-        setViewingProof({ invoice, proof }); // Abre o Modal Padrão de Comprovante
+      setViewingProof({ invoice, proof }); // Modal padrão de comprovante digital
     }
   };
 
@@ -1319,6 +1342,61 @@ const requestSort = (key: string) => {
         }
     } else {
         alert("Valor inválido."); // Esse alert simples pode ficar ou podemos usar notify
+    }
+  };
+
+  // --- BAIXA MANUAL (GESTOR) ---
+  const openManualSettleModal = (invoice: Invoice, status: 'DELIVERED' | 'FAILED') => {
+    setManualSettleModal({
+      open: true,
+      invoice,
+      status,
+      reason: '',
+      lossValue: '',
+      loading: false,
+    });
+  };
+
+  const confirmManualSettle = async () => {
+    if (!manualSettleModal.invoice) return;
+    if (!manualSettleModal.reason.trim()) {
+      alert('Informe o motivo da baixa manual.');
+      return;
+    }
+
+    setManualSettleModal((prev) => ({ ...prev, loading: true }));
+    try {
+      const parsedLoss =
+        manualSettleModal.status === 'FAILED' && manualSettleModal.lossValue
+          ? parseFloat(manualSettleModal.lossValue.replace(',', '.'))
+          : undefined;
+
+      await db.adminManualSettleInvoice(manualSettleModal.invoice.id, {
+        status: manualSettleModal.status,
+        reason: manualSettleModal.reason.trim(),
+        lossValue: parsedLoss,
+      });
+
+      notify(
+        'Baixa manual aplicada',
+        `NF ${manualSettleModal.invoice.number} marcada como ${
+          manualSettleModal.status === 'DELIVERED' ? 'ENTREGUE' : 'DEVOLVIDA'
+        } pelo gestor.`,
+        'SUCCESS'
+      );
+      await refreshData();
+      setManualSettleModal({
+        open: false,
+        invoice: null,
+        status: 'DELIVERED',
+        reason: '',
+        lossValue: '',
+        loading: false,
+      });
+    } catch (e) {
+      console.error(e);
+      notify('Erro', 'Não foi possível aplicar a baixa manual.', 'WARNING');
+      setManualSettleModal((prev) => ({ ...prev, loading: false }));
     }
   };
 
@@ -1883,8 +1961,15 @@ const requestSort = (key: string) => {
             {/* <span className="text-[8px] text-red-500">{inv.last_failure_reason}</span> */}
 
             {/* ✨ BADGE DE TENTATIVAS ✨ */}
-            {/* Mostra se tiver tentativas > 1 OU se tiver motivo gravado (mesmo na 1ª tentativa) */}
-            {((inv.delivery_attempts && inv.delivery_attempts > 1) || inv.last_failure_reason) && (
+            {/* Mostra se tiver tentativas > 1 OU se tiver motivo gravado (mesmo na 1ª tentativa),
+                exceto quando a baixa foi feita manualmente pelo gestor. */}
+            {(
+              (
+                (inv.delivery_attempts && inv.delivery_attempts > 1) ||
+                inv.last_failure_reason
+              ) &&
+              !(inv.last_failure_reason && inv.last_failure_reason.includes('BAIXA MANUAL (GESTOR)'))
+            ) && (
                 <div 
                   className="group relative inline-block"
                   title={inv.last_failure_reason || "Motivo não registrado"}
@@ -2035,6 +2120,26 @@ const requestSort = (key: string) => {
                                     <DollarSign size={16} />
                                     <span>Editar Valor de Reentrega</span>
                                   </button>
+                                )}
+
+                                {/* Baixa manual pelo gestor */}
+                                {(inv.status === 'PENDING' || inv.status === 'IN_PROGRESS' || inv.status === 'ISSUE') && (
+                                  <>
+                                    <button
+                                      onClick={() => openManualSettleModal(inv, 'DELIVERED')}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
+                                    >
+                                      <CheckCircle size={16} />
+                                      <span>Baixa manual como Entregue</span>
+                                    </button>
+                                    <button
+                                      onClick={() => openManualSettleModal(inv, 'FAILED')}
+                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
+                                    >
+                                      <AlertTriangle size={16} />
+                                      <span>Baixa manual como Devolvida</span>
+                                    </button>
+                                  </>
                                 )}
 
                                 {/* Comprovante / Pendência */}
@@ -2743,6 +2848,229 @@ const requestSort = (key: string) => {
                 disabled={modalFinalize.loading}
               >
                 {modalFinalize.loading ? 'Enviando...' : (modalFinalize.outcome === 'CONCLUDED' ? 'Concluir devolução' : 'Cancelar devolução')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL DE COMPROVANTE DE BAIXA MANUAL (GESTOR) --- */}
+      {viewingManualProof && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-700 overflow-hidden">
+            <div className="px-6 py-4 bg-slate-900 dark:bg-black text-white flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <FileText size={18} className="text-sky-400" />
+                  Comprovante de Baixa Manual (Gestor)
+                </h3>
+                <p className="text-xs text-slate-300 mt-1">
+                  NF-e {viewingManualProof.number} • R${' '}
+                  {viewingManualProof.value.toLocaleString('pt-BR', {
+                    minimumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+              <button
+                onClick={() => setViewingManualProof(null)}
+                className="text-slate-300 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 space-y-4 text-sm text-slate-700 dark:text-slate-200">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">
+                    Destinatário
+                  </p>
+                  <p className="font-medium">{viewingManualProof.customer_name}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {viewingManualProof.customer_address}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">
+                    Status atual
+                  </p>
+                  <p className="text-xs">
+                    <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[11px] font-semibold">
+                      {viewingManualProof.status === DeliveryStatus.DELIVERED
+                        ? 'ENTREGUE (BAIXA MANUAL)'
+                        : 'DEVOLVIDA (BAIXA MANUAL)'}
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                    Baixada manualmente em:{' '}
+                    {viewingManualProof.delivered_at
+                      ? new Date(viewingManualProof.delivered_at).toLocaleString('pt-BR')
+                      : 'Data não registrada'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 dark:border-slate-700 rounded-lg p-3 bg-slate-50 dark:bg-slate-900/40">
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                  Motivo registrado
+                </p>
+                <pre className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100 bg-transparent">
+                  {viewingManualProof.last_failure_reason ||
+                    '— Nenhum motivo registrado. Verifique a configuração da baixa manual.'}
+                </pre>
+              </div>
+
+              {typeof viewingManualProof.return_value === 'number' && viewingManualProof.return_value > 0 && (
+                <div className="border border-red-200 dark:border-red-800 rounded-lg p-3 bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-xs">
+                  <p className="font-semibold text-[11px] uppercase mb-1">
+                    Valor de prejuízo / devolução registrado
+                  </p>
+                  <p className="text-sm">
+                    R{'$ '}
+                    {Number(viewingManualProof.return_value).toLocaleString('pt-BR', {
+                      minimumFractionDigits: 2,
+                    })}
+                  </p>
+                </div>
+              )}
+
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-2">
+                Este comprovante foi gerado a partir de uma baixa manual aplicada pelo gestor, sem
+                intervenção do aplicativo do motorista.
+              </p>
+            </div>
+
+            <div className="px-6 py-3 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-700 flex justify-end">
+              <button
+                onClick={() => setViewingManualProof(null)}
+                className="px-4 py-1.5 rounded-md text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Baixa Manual (Gestor) */}
+      {manualSettleModal.open && manualSettleModal.invoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700">
+            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {manualSettleModal.status === 'DELIVERED' ? (
+                  <CheckCircle className="text-emerald-500" />
+                ) : (
+                  <AlertTriangle className="text-red-500" />
+                )}
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Baixa manual – {manualSettleModal.status === 'DELIVERED' ? 'Entregue' : 'Devolvida'}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    NF {manualSettleModal.invoice.number} – {manualSettleModal.invoice.customer_name}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() =>
+                  setManualSettleModal({
+                    open: false,
+                    invoice: null,
+                    status: 'DELIVERED',
+                    reason: '',
+                    lossValue: '',
+                    loading: false,
+                  })
+                }
+                className="text-slate-400 hover:text-slate-200"
+                disabled={manualSettleModal.loading}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-6 py-4 space-y-4 text-sm">
+              <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
+                Use esta opção apenas quando a baixa precisar ser aplicada pelo gestor, sem ação do motorista
+                (ex.: integração externa, erro de operação, acerto manual).
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                  Motivo da baixa manual <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  className="w-full min-h-[80px] text-sm rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Descreva por que essa nota está sendo baixada manualmente (ex.: integração ERP, conferência física, ajuste de estoque etc.)"
+                  value={manualSettleModal.reason}
+                  onChange={(e) =>
+                    setManualSettleModal((prev) => ({ ...prev, reason: e.target.value }))
+                  }
+                  disabled={manualSettleModal.loading}
+                />
+              </div>
+
+              {manualSettleModal.status === 'FAILED' && (
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Valor do prejuízo / devolução (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full text-sm rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Ex.: 1500,00"
+                    value={manualSettleModal.lossValue}
+                    onChange={(e) =>
+                      setManualSettleModal((prev) => ({ ...prev, lossValue: e.target.value }))
+                    }
+                    disabled={manualSettleModal.loading}
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Se informado, esse valor será registrado em <strong>return_value</strong> como
+                    prejuízo da nota.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-3">
+              <button
+                onClick={() =>
+                  setManualSettleModal({
+                    open: false,
+                    invoice: null,
+                    status: 'DELIVERED',
+                    reason: '',
+                    lossValue: '',
+                    loading: false,
+                  })
+                }
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                disabled={manualSettleModal.loading}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmManualSettle}
+                disabled={manualSettleModal.loading}
+                className="px-4 py-1.5 rounded-md text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {manualSettleModal.loading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    {manualSettleModal.status === 'DELIVERED' ? (
+                      <CheckCircle size={14} />
+                    ) : (
+                      <AlertTriangle size={14} />
+                    )}
+                    Confirmar baixa manual
+                  </>
+                )}
               </button>
             </div>
           </div>
