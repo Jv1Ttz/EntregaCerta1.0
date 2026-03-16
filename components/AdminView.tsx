@@ -133,14 +133,12 @@ const [sortConfig, setSortConfig] = useState<{
     invoice: Invoice | null;
     status: 'DELIVERED' | 'FAILED';
     reason: string;
-    lossValue: string;
     loading?: boolean;
   }>({
     open: false,
     invoice: null,
     status: 'DELIVERED',
     reason: '',
-    lossValue: '',
     loading: false,
   });
 
@@ -1352,7 +1350,6 @@ const requestSort = (key: string) => {
       invoice,
       status,
       reason: '',
-      lossValue: '',
       loading: false,
     });
   };
@@ -1366,15 +1363,10 @@ const requestSort = (key: string) => {
 
     setManualSettleModal((prev) => ({ ...prev, loading: true }));
     try {
-      const parsedLoss =
-        manualSettleModal.status === 'FAILED' && manualSettleModal.lossValue
-          ? parseFloat(manualSettleModal.lossValue.replace(',', '.'))
-          : undefined;
-
       await db.adminManualSettleInvoice(manualSettleModal.invoice.id, {
         status: manualSettleModal.status,
         reason: manualSettleModal.reason.trim(),
-        lossValue: parsedLoss,
+        lossValue: undefined,
       });
 
       notify(
@@ -1390,7 +1382,6 @@ const requestSort = (key: string) => {
         invoice: null,
         status: 'DELIVERED',
         reason: '',
-        lossValue: '',
         loading: false,
       });
     } catch (e) {
@@ -2979,7 +2970,6 @@ const requestSort = (key: string) => {
                     invoice: null,
                     status: 'DELIVERED',
                     reason: '',
-                    lossValue: '',
                     loading: false,
                   })
                 }
@@ -3011,27 +3001,7 @@ const requestSort = (key: string) => {
                 />
               </div>
 
-              {manualSettleModal.status === 'FAILED' && (
-                <div className="space-y-1">
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
-                    Valor do prejuízo / devolução (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full text-sm rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Ex.: 1500,00"
-                    value={manualSettleModal.lossValue}
-                    onChange={(e) =>
-                      setManualSettleModal((prev) => ({ ...prev, lossValue: e.target.value }))
-                    }
-                    disabled={manualSettleModal.loading}
-                  />
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Se informado, esse valor será registrado em <strong>return_value</strong> como
-                    prejuízo da nota.
-                  </p>
-                </div>
-              )}
+              {/* Campo de valor de prejuízo removido conforme solicitado */}
             </div>
 
             <div className="px-6 py-3 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-3">
@@ -3042,7 +3012,6 @@ const requestSort = (key: string) => {
                     invoice: null,
                     status: 'DELIVERED',
                     reason: '',
-                    lossValue: '',
                     loading: false,
                   })
                 }

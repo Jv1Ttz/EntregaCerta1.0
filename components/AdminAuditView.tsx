@@ -7,6 +7,7 @@ export const AdminAuditView: React.FC = () => {
   const [deletedInvoices, setDeletedInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -63,8 +64,11 @@ export const AdminAuditView: React.FC = () => {
           </div>
         ) : (
           <div className="mt-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
-            <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 flex justify-between">
+            <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
               <span>Total de notas excluídas: {deletedInvoices.length}</span>
+              <span className="text-[10px] md:text-xs text-slate-400 dark:text-slate-500">
+                Cuidado: exclusão definitiva remove a nota e seus comprovantes do banco.
+              </span>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-xs md:text-sm text-left text-slate-700 dark:text-slate-200">
@@ -76,6 +80,7 @@ export const AdminAuditView: React.FC = () => {
                     <th className="px-3 py-2">Valor</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2">Motivo</th>
+                    <th className="px-3 py-2 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -108,6 +113,30 @@ export const AdminAuditView: React.FC = () => {
                       </td>
                       <td className="px-3 py-2 text-[11px] md:text-xs max-w-xs truncate">
                         {inv.deleted_reason || '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          disabled={deletingId === inv.id}
+                          onClick={async () => {
+                            if (!window.confirm('Excluir definitivamente esta nota e seus comprovantes do banco? Esta ação não pode ser desfeita.')) {
+                              return;
+                            }
+                            try {
+                              setDeletingId(inv.id);
+                              await db.hardDeleteInvoice(inv.id);
+                              setDeletedInvoices((prev) => prev.filter((d) => d.id !== inv.id));
+                            } catch (e) {
+                              console.error(e);
+                              alert('Erro ao excluir nota definitivamente. Verifique o console.');
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
+                        >
+                          <Trash2 size={12} />
+                          {deletingId === inv.id ? 'Excluindo...' : 'Excluir definitivo'}
+                        </button>
                       </td>
                     </tr>
                   ))}

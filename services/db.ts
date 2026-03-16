@@ -266,6 +266,31 @@ export const db = {
     return (data as Invoice[]) || [];
   },
 
+  // Exclusão definitiva: remove nota e comprovantes do banco (usar apenas em auditoria)
+  hardDeleteInvoice: async (invoiceId: string) => {
+    // Remove comprovantes associados
+    const { error: proofError } = await supabase
+      .from('delivery_proofs')
+      .delete()
+      .eq('invoice_id', invoiceId);
+
+    if (proofError) {
+      console.error('Erro ao apagar comprovantes da nota:', proofError);
+      throw proofError;
+    }
+
+    // Remove nota definitivamente
+    const { error } = await supabase
+      .from('invoices')
+      .delete()
+      .eq('id', invoiceId);
+
+    if (error) {
+      console.error('Erro ao apagar nota (hard delete):', error);
+      throw error;
+    }
+  },
+
 //Trecho que mudei a logica do em rota 👇
 assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: string | null) => {
     const { data: currentInv } = await supabase.from('invoices').select('driver_id, number').eq('id', invoiceId).single();
