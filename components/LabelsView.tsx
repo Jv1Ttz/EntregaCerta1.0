@@ -383,10 +383,10 @@ export const LabelsView: React.FC = () => {
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Descrição / Rota</label>
+              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Descrição</label>
               <input
                 type="text"
-                placeholder="Ex: Rota: Setor Sul"
+                placeholder="Ex: Nome do produto"
                 value={label.labelText}
                 onChange={e => updateLabel('labelText', e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500"
