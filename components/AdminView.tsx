@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
+import { LabelsView } from './LabelsView';
 
 import Map, { Marker, NavigationControl, FullscreenControl } from 'react-map-gl';
 import type { MapRef } from 'react-map-gl';
@@ -127,6 +128,7 @@ const [sortConfig, setSortConfig] = useState<{
   // Modal para finalizar devolução (concluir / cancelar)
   const [modalFinalize, setModalFinalize] = useState<{ open: boolean; invoice: Invoice | null; outcome: 'CONCLUDED' | 'CANCELLED' | null; note: string; loading?: boolean }>({ open: false, invoice: null, outcome: null, note: '', loading: false });
   const [openActionsRow, setOpenActionsRow] = useState<string | null>(null);
+  const [activeSidebarSection, setActiveSidebarSection] = useState<'main' | 'etiquetas'>('main');
   // Modal de baixa manual (gestor)
   const [manualSettleModal, setManualSettleModal] = useState<{
     open: boolean;
@@ -1436,7 +1438,7 @@ const requestSort = (key: string) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 pb-20 transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 flex flex-col">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
 
       {/* Header */}
@@ -1473,9 +1475,54 @@ const requestSort = (key: string) => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-        
-       
+      <div className="flex flex-1">
+
+        {/* Sidebar — fixed para não sumir ao rolar a página */}
+        <aside className="group fixed top-[57px] left-0 h-[calc(100vh-57px)] w-14 hover:w-52 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0 z-20 shadow-sm">
+          <nav className="flex flex-col gap-1 p-2 pt-4">
+            <button
+              onClick={() => setActiveSidebarSection('main')}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg w-full text-left transition-colors ${
+                activeSidebarSection === 'main'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+              }`}
+              title="Gestão"
+            >
+              <LayoutDashboard size={20} className="shrink-0" />
+              <span className="text-sm font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 delay-75">
+                Gestão
+              </span>
+            </button>
+
+            <div className="my-1 mx-3 border-t border-slate-100 dark:border-slate-700/60" />
+
+            <button
+              onClick={() => setActiveSidebarSection('etiquetas')}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg w-full text-left transition-colors ${
+                activeSidebarSection === 'etiquetas'
+                  ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white'
+              }`}
+              title="Etiquetas"
+            >
+              <Tag size={20} className="shrink-0" />
+              <span className="text-sm font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 delay-75">
+                Etiquetas
+              </span>
+            </button>
+          </nav>
+        </aside>
+
+      {/* ml-14 = mesma largura do sidebar colapsado (w-14 = 56px) */}
+      <main className="flex-1 ml-14 p-4 md:p-8 space-y-6 pb-20">
+
+        {/* ===== MÓDULO ETIQUETAS ===== */}
+        {activeSidebarSection === 'etiquetas' && (
+          <LabelsView />
+        )}
+
+        {activeSidebarSection === 'main' && (<>
 
         {/* Actions Bar */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -2175,7 +2222,11 @@ const requestSort = (key: string) => {
             </table>
           </div>
         </div>
+
+        </>)} {/* fim do bloco activeSidebarSection === 'main' */}
+
       </main>
+      </div>
 
   {processingKey && (
         <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">

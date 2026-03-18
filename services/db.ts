@@ -464,6 +464,26 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     );
   },
 
+  // --- SAVED LABELS ---
+  getSavedLabels: async (): Promise<{ id: string; name: string; barcode_value: string; label_text: string; format: string; created_at: string }[]> => {
+    const { data, error } = await supabase
+      .from('saved_labels')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) { console.error('Erro ao buscar etiquetas:', error); return []; }
+    return data ?? [];
+  },
+
+  addSavedLabel: async (label: { name: string; barcode_value: string; label_text: string; format: string }) => {
+    const { error } = await supabase.from('saved_labels').insert(label);
+    if (error) throw error;
+  },
+
+  deleteSavedLabel: async (id: string) => {
+    const { error } = await supabase.from('saved_labels').delete().eq('id', id);
+    if (error) throw error;
+  },
+
   verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
     return passwordInput === (import.meta.env.VITE_ADMIN_PASSWORD || ADMIN_PASSWORD_DEFAULT);
   },
