@@ -54,11 +54,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
 
   const [viewingIssue, setViewingIssue] = useState<{invoice: Invoice, proof: DeliveryProof} | null>(null);
 
-  // 1. Adicione isso junto com os outros 'useState' no topo da função AdminView
-const [sortConfig, setSortConfig] = useState<{ 
-  key: string; 
-  direction: 'asc' | 'desc' 
-}>({ key: 'created_at', direction: 'desc' }); // Começa ordenando pela data (mais recente primeiro)
+  const [sortConfig, setSortConfig] = useState<Array<{ key: string; direction: 'asc' | 'desc' }>>([
+    { key: 'created_at', direction: 'desc' }
+  ]);
 
   const [zoomedRotation, setZoomedRotation] = useState(0);
   useEffect(() => {
@@ -853,49 +851,50 @@ const [sortConfig, setSortConfig] = useState<{
 
   // 2. Cole isso logo DEPOIS do 'filteredInvoices'
 const sortedInvoices = useMemo(() => {
-  // Cria uma cópia para não estragar a original
   const items = [...filteredInvoices];
-  
+
   items.sort((a: any, b: any) => {
-    // Pega o valor da coluna escolhida (ex: 'customer_name')
-    let aValue = a[sortConfig.key];
-    let bValue = b[sortConfig.key];
+    for (const { key, direction } of sortConfig) {
+      let aValue = a[key];
+      let bValue = b[key];
 
-    // TRUQUE: Se for Motorista ou Veículo, precisamos buscar o NOME, não o ID
-    if (sortConfig.key === 'driver_id') {
-      aValue = drivers.find(d => d.id === a.driver_id)?.name || '';
-      bValue = drivers.find(d => d.id === b.driver_id)?.name || '';
-    }
-    if (sortConfig.key === 'vehicle_id') {
-      aValue = vehicles.find(v => v.id === a.vehicle_id)?.plate || '';
-      bValue = vehicles.find(v => v.id === b.vehicle_id)?.plate || '';
-    }
+      if (key === 'driver_id') {
+        aValue = drivers.find(d => d.id === a.driver_id)?.name || '';
+        bValue = drivers.find(d => d.id === b.driver_id)?.name || '';
+      }
+      if (key === 'vehicle_id') {
+        aValue = vehicles.find(v => v.id === a.vehicle_id)?.plate || '';
+        bValue = vehicles.find(v => v.id === b.vehicle_id)?.plate || '';
+      }
 
-    // Se um valor for vazio, joga pro final
-    if (!aValue) return 1;
-    if (!bValue) return -1;
+      if (!aValue && !bValue) continue;
+      if (!aValue) return 1;
+      if (!bValue) return -1;
 
-    // Compara A com B
-    if (aValue < bValue) {
-      return sortConfig.direction === 'asc' ? -1 : 1;
-    }
-    if (aValue > bValue) {
-      return sortConfig.direction === 'asc' ? 1 : -1;
+      if (aValue < bValue) return direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return direction === 'asc' ? 1 : -1;
     }
     return 0;
   });
-  
+
   return items;
 }, [filteredInvoices, sortConfig, drivers, vehicles]);
 
-// Função que você vai chamar ao clicar no cabeçalho
-const requestSort = (key: string) => {
-  let direction: 'asc' | 'desc' = 'asc';
-  // Se já estiver ordenado por essa coluna e for 'asc', vira 'desc'
-  if (sortConfig.key === key && sortConfig.direction === 'asc') {
-    direction = 'desc';
-  }
-  setSortConfig({ key, direction });
+const requestSort = (key: string, _event: React.MouseEvent) => {
+  setSortConfig(prev => {
+    const existing = prev.find(s => s.key === key);
+    if (!existing) {
+      // Coluna inativa: entra como prioridade 1
+      return [{ key, direction: 'asc' as const }, ...prev];
+    }
+    if (existing.direction === 'asc') {
+      // ↑ → ↓
+      return prev.map(s => s.key === key ? { ...s, direction: 'desc' as const } : s);
+    }
+    // ↓ → remove
+    const remaining = prev.filter(s => s.key !== key);
+    return remaining.length > 0 ? remaining : [{ key: 'created_at', direction: 'desc' as const }];
+  });
 };
 
   const toggleSelectAll = () => {
@@ -1920,51 +1919,50 @@ const requestSort = (key: string) => {
                   
                   {/* Outras Colunas (Adicionei bg-slate-700 em todas para o sticky funcionar bem) */}
                  {/* CLICÁVEL: Nota/Data (Ordena pelo numero) */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('number')}>
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('number', e as React.MouseEvent)}>
       <div className="flex items-center gap-1">
-        Nota / Data 
-        {/* Mostra setinha se estiver ativo */}
-        {sortConfig.key === 'number' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
+        Nota / Data
+        {(() => { const s = sortConfig.find(s => s.key === 'number'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
 
     {/* CLICÁVEL: Cliente */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('customer_name')}>
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('customer_name', e)}>
       <div className="flex items-center gap-1">
-        Cliente 
-        {sortConfig.key === 'customer_name' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
+        Cliente
+        {(() => { const s = sortConfig.find(s => s.key === 'customer_name'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
 
     {/* CLICÁVEL: Status */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('status')}>
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('status', e)}>
       <div className="flex items-center gap-1">
-        Status 
-        {sortConfig.key === 'status' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
+        Status
+        {(() => { const s = sortConfig.find(s => s.key === 'status'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
 
     {/* CLICÁVEL: Realização */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('delivered_at')}>
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('delivered_at', e)}>
       <div className="flex items-center gap-1">
-        Realização 
-        {sortConfig.key === 'delivered_at' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
-      </div>
-    </th>
-
-    {/* CLICÁVEL: Veículo */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('vehicle_id')}>
-      <div className="flex items-center gap-1">
-        Motorista
-        {sortConfig.key === 'vehicle_id' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
+        Realização
+        {(() => { const s = sortConfig.find(s => s.key === 'delivered_at'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
 
     {/* CLICÁVEL: Motorista */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600" onClick={() => requestSort('driver_id')}>
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('vehicle_id', e)}>
+      <div className="flex items-center gap-1">
+        Motorista
+        {(() => { const s = sortConfig.find(s => s.key === 'vehicle_id'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
+      </div>
+    </th>
+
+    {/* CLICÁVEL: Veículo */}
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('driver_id', e)}>
       <div className="flex items-center gap-1">
         Veículo
-        {sortConfig.key === 'driver_id' && (sortConfig.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>)}
+        {(() => { const s = sortConfig.find(s => s.key === 'driver_id'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
                   {/* Célula de Ações (Canto direito arredondado) */}
