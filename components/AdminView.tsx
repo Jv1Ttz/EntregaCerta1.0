@@ -1608,7 +1608,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
 
         {/* --- 1. CARDS DE STATUS (MANTIDO) --- */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
            {[
              { label: 'Faturadas', count: countPending, icon: Clock, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
              { label: 'Em Rota', count: countProgress, icon: Navigation2, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
@@ -1942,6 +1942,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       </div>
     </th>
 
+    {/* CLICÁVEL: Valor */}
+    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('value', e)}>
+      <div className="flex items-center gap-1">
+        Valor
+        {(() => { const s = sortConfig.find(s => s.key === 'value'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
+      </div>
+    </th>
+
     {/* CLICÁVEL: Realização */}
     <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('delivered_at', e)}>
       <div className="flex items-center gap-1">
@@ -2051,7 +2059,18 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         <div className="text-xs text-slate-500 dark:text-slate-400 truncate" title={inv.customer_address}>{inv.customer_address}</div>
                       </td>
                       <td className="px-6 py-4">
-                    {getStatusBadge(inv)}
+                        {getStatusBadge(inv)}
+                      </td>
+
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                          {inv.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        </span>
+                        {inv.original_value && inv.original_value !== inv.value && (
+                          <span className="block text-[10px] text-slate-400 line-through">
+                            {inv.original_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </span>
+                        )}
                       </td>
 
                       {/* 👇👇 NOVA CÉLULA DE DATA DE ENTREGA 👇👇 */}

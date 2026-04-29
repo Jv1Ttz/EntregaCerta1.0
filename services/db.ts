@@ -2,7 +2,6 @@ import { supabase } from './supabaseClient';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
 
 // Senha de admin padrão
-const ADMIN_PASSWORD_DEFAULT = 'admin123';
 
 export const db = {
   init: () => {
@@ -485,7 +484,9 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   },
 
   verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
-    return passwordInput === (import.meta.env.VITE_ADMIN_PASSWORD || ADMIN_PASSWORD_DEFAULT);
+    const configured = import.meta.env.VITE_ADMIN_PASSWORD;
+    if (!configured) return false;
+    return passwordInput === configured;
   },
 
   updateAdminPassword: async (newPassword: string) => {
