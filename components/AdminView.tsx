@@ -728,6 +728,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
         await refreshData();
     }
 
+    if (results.success > 0) {
+      await db.addLog('XML_IMPORT', `Importação XML: ${results.success} nota(s) importada(s), ${results.duplicates} duplicada(s), ${results.errors} erro(s)`);
+    }
+
     setImportSummary(results); // Mostra o relatório
     setUploading(false);
   };

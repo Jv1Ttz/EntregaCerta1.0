@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/db';
 import { Invoice, Driver, Vehicle, DeliveryStatus } from '../types';
-import { Search, ChevronLeft, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, ChevronLeft, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink } from 'lucide-react';
 
 interface SellerViewProps {
   onBack: () => void;
@@ -65,7 +65,6 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [sortConfig, setSortConfig] = useState<Array<{ key: string; direction: 'asc' | 'desc' }>>([
     { key: 'created_at', direction: 'desc' },
   ]);
-
   useEffect(() => {
     Promise.all([db.getInvoices(), db.getDrivers(), db.getVehicles()]).then(
       ([inv, drv, veh]) => {
@@ -364,17 +363,15 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                     <th className="px-4 py-3 cursor-pointer hover:bg-slate-600 select-none" onClick={() => requestSort('created_at')}>
                       <div className="flex items-center gap-1">Entrada <SortIcon colKey="created_at" /></div>
                     </th>
-                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-600 select-none rounded-tr-lg" onClick={() => requestSort('delivered_at')}>
+                    <th className="px-4 py-3 cursor-pointer hover:bg-slate-600 select-none" onClick={() => requestSort('delivered_at')}>
                       <div className="flex items-center gap-1">Realização <SortIcon colKey="delivered_at" /></div>
                     </th>
+                    <th className="px-4 py-3 rounded-tr-lg" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                   {sorted.map(inv => (
-                    <tr
-                      key={inv.id}
-                      className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
-                    >
+                    <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                       <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-200">
                         {inv.number}
                         {inv.series && (
@@ -408,6 +405,18 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
                         {formatDate(inv.delivered_at)}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {inv.pdf_url && (
+                          <a
+                            href={inv.pdf_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
+                          >
+                            <ExternalLink size={12} /> PDF
+                          </a>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -423,10 +432,22 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       Nº {inv.number}
                       {inv.series && <span className="text-slate-400 dark:text-slate-500">/{inv.series}</span>}
                     </span>
-                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
-                      {STATUS_ICON[inv.status]}
-                      {STATUS_LABEL[inv.status] ?? inv.status}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
+                        {STATUS_ICON[inv.status]}
+                        {STATUS_LABEL[inv.status] ?? inv.status}
+                      </span>
+                      {inv.pdf_url && (
+                        <a
+                          href={inv.pdf_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30"
+                        >
+                          <ExternalLink size={12} /> PDF
+                        </a>
+                      )}
+                    </div>
                   </div>
                   <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
                     {inv.customer_name}
@@ -445,6 +466,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
           </div>
         )}
       </div>
+
     </div>
   );
 };

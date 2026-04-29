@@ -114,6 +114,16 @@ export interface InvoiceItem {
   value: number;
 }
 
+export type ActivityLogEventType = 'ASSIGNMENT' | 'STATUS_CHANGE' | 'XML_IMPORT' | 'SOFT_DELETE';
+
+export interface ActivityLog {
+  id: string;
+  event_type: ActivityLogEventType;
+  description: string;
+  actor: string;
+  created_at: string;
+}
+
 export type ViewState =
   | { type: 'ROLE_SELECT' }
   | { type: 'ADMIN_LOGIN' }

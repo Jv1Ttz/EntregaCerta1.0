@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
+import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
 
 // Senha de admin padrão
 
@@ -34,6 +34,9 @@ export const db = {
         .eq('id', invoiceId);
 
     if (error) throw error;
+
+    const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
+    await db.addLog('STATUS_CHANGE', `NF ${inv?.number || invoiceId} liberada para reentrega (${nextAttempt}ª tentativa)`);
   },
   
   // Função auxiliar para editar valor (caso seja devolução parcial e precise ajustar)
@@ -75,6 +78,10 @@ export const db = {
         .eq('id', invoiceId);
 
       if (error) throw error;
+
+      const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
+      const outcomeLabel = outcome === 'CONCLUDED' ? 'concluída' : 'cancelada';
+      await db.addLog('STATUS_CHANGE', `Devolução da NF ${inv?.number || invoiceId} ${outcomeLabel}${adminNote ? ` — ${adminNote}` : ''}`);
     } catch (err) {
       throw err;
     }
@@ -234,6 +241,8 @@ export const db = {
 
   // Soft delete: marca a nota como excluída, mas mantém o registro para auditoria
   deleteInvoice: async (invoiceId: string, reason?: string) => {
+    const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
+
     const { error } = await supabase
       .from('invoices')
       .update({
@@ -247,6 +256,8 @@ export const db = {
       console.error('Erro ao excluir (soft delete) invoice:', error);
       throw error;
     }
+
+    await db.addLog('SOFT_DELETE', `NF ${inv?.number || invoiceId} excluída${reason ? ` — Motivo: ${reason}` : ''}`);
   },
 
   // Lista de notas excluídas (para tela de auditoria do gestor)
@@ -318,8 +329,20 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
 
     await supabase.from('invoices').update(updates).eq('id', invoiceId);
 
-    if (driverId && currentInv && currentInv.driver_id !== driverId) {
-       await db.addNotification(driverId, 'Nova Carga', `NF ${currentInv.number} adicionada.`, 'INFO');
+    if (currentInv) {
+      const parts: string[] = [];
+      if (driverId && currentInv.driver_id !== driverId) {
+        const { data: drv } = await supabase.from('drivers').select('name').eq('id', driverId).single();
+        parts.push(`Motorista: ${drv?.name || driverId}`);
+        await db.addNotification(driverId, 'Nova Carga', `NF ${currentInv.number} adicionada.`, 'INFO');
+      }
+      if (vehicleId) {
+        const { data: veh } = await supabase.from('vehicles').select('plate').eq('id', vehicleId).single();
+        parts.push(`Veículo: ${veh?.plate || vehicleId}`);
+      }
+      if (parts.length > 0) {
+        await db.addLog('ASSIGNMENT', `NF ${currentInv.number} — ${parts.join(', ')}`);
+      }
     }
   },
 
@@ -455,10 +478,15 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       throw error;
     }
 
+    const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
+    const nf = inv?.number || invoiceId;
+    const statusLabel = status === 'DELIVERED' ? 'Entregue' : 'Devolvida';
+    await db.addLog('STATUS_CHANGE', `Baixa manual na NF ${nf} como ${statusLabel} — Motivo: ${reason}`);
+
     await db.addNotification(
       'ADMIN',
       'Baixa manual aplicada',
-      `NF ${invoiceId} atualizada para ${status} pelo gestor.`,
+      `NF ${nf} atualizada para ${status} pelo gestor.`,
       'INFO'
     );
   },
@@ -481,6 +509,22 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   deleteSavedLabel: async (id: string) => {
     const { error } = await supabase.from('saved_labels').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  // --- ACTIVITY LOG ---
+  addLog: async (event_type: ActivityLogEventType, description: string, actor: string = 'ADMIN') => {
+    const { error } = await supabase.from('activity_logs').insert({ event_type, description, actor });
+    if (error) console.error('Erro ao salvar log:', error);
+  },
+
+  getLogs: async (filters?: { event_type?: ActivityLogEventType; start?: string; end?: string }): Promise<ActivityLog[]> => {
+    let query = supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(500);
+    if (filters?.event_type) query = query.eq('event_type', filters.event_type);
+    if (filters?.start) query = query.gte('created_at', filters.start);
+    if (filters?.end) query = query.lte('created_at', filters.end + 'T23:59:59');
+    const { data, error } = await query;
+    if (error) { console.error('Erro ao buscar logs:', error); return []; }
+    return (data as ActivityLog[]) || [];
   },
 
   verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
