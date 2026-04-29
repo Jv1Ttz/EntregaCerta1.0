@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/db';
-import { Invoice, Driver, Vehicle, DeliveryStatus } from '../types';
-import { Search, ChevronLeft, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink } from 'lucide-react';
+import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
+import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface SellerViewProps {
   onBack: () => void;
@@ -65,6 +65,13 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [sortConfig, setSortConfig] = useState<Array<{ key: string; direction: 'asc' | 'desc' }>>([
     { key: 'created_at', direction: 'desc' },
   ]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [viewingProof, setViewingProof] = useState<{ invoice: Invoice; proof: DeliveryProof } | null>(null);
+  const [loadingProofId, setLoadingProofId] = useState<string | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [zoomedScale, setZoomedScale] = useState(1);
+
   useEffect(() => {
     Promise.all([db.getInvoices(), db.getDrivers(), db.getVehicles()]).then(
       ([inv, drv, veh]) => {
@@ -166,6 +173,26 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
       const remaining = prev.filter(s => s.key !== key);
       return remaining.length > 0 ? remaining : [{ key: 'created_at', direction: 'desc' as const }];
     });
+  };
+
+  // Reset page when filters or sort change
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate, sortConfig]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
+  }, [sorted, currentPage, pageSize]);
+
+  const handleViewProof = async (invoice: Invoice) => {
+    setLoadingProofId(invoice.id);
+    try {
+      const proof = await db.getProofByInvoiceId(invoice.id);
+      if (!proof) { alert('Comprovante ainda não sincronizado ou não encontrado.'); return; }
+      setViewingProof({ invoice, proof });
+    } finally {
+      setLoadingProofId(null);
+    }
   };
 
   const SortIcon = ({ colKey }: { colKey: string }) => {
@@ -370,33 +397,35 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                  {sorted.map(inv => (
+                  {paginated.map(inv => (
                     <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-200">
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-700 dark:text-slate-200 whitespace-nowrap">
                         {inv.number}
                         {inv.series && (
                           <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">/{inv.series}</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
+                      <td className="px-4 py-3 max-w-[180px]">
+                        <div className="font-medium text-slate-800 dark:text-slate-100 truncate">
                           {inv.customer_name}
                         </div>
-                        <div className="text-xs text-slate-400 dark:text-slate-500">{inv.customer_doc}</div>
+                        <div className="text-xs text-slate-400 dark:text-slate-500 truncate">{inv.customer_doc}</div>
                       </td>
                       <td className="px-4 py-3 text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {formatCurrency(inv.value)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
                           {STATUS_ICON[inv.status]}
                           {STATUS_LABEL[inv.status] ?? inv.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap max-w-[130px] truncate"
+                          title={inv.driver_id ? (driverMap[inv.driver_id] ?? '') : ''}>
                         {inv.driver_id ? (driverMap[inv.driver_id] ?? '—') : '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300">
+                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap max-w-[130px] truncate"
+                          title={inv.vehicle_id ? (vehicleMap[inv.vehicle_id] ?? '') : ''}>
                         {inv.vehicle_id ? (vehicleMap[inv.vehicle_id] ?? '—') : '—'}
                       </td>
                       <td className="px-4 py-3 text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -406,16 +435,28 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                         {formatDate(inv.delivered_at)}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        {inv.pdf_url && (
-                          <a
-                            href={inv.pdf_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
-                          >
-                            <ExternalLink size={12} /> PDF
-                          </a>
-                        )}
+                        <div className="flex items-center justify-end gap-1">
+                          {inv.pdf_url && (
+                            <a
+                              href={inv.pdf_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors"
+                            >
+                              <ExternalLink size={12} /> PDF
+                            </a>
+                          )}
+                          {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
+                            <button
+                              onClick={() => handleViewProof(inv)}
+                              disabled={loadingProofId === inv.id}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50"
+                            >
+                              {loadingProofId === inv.id ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                              Comprovante
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -425,7 +466,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
 
             {/* Mobile cards */}
             <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-700">
-              {filtered.map(inv => (
+              {paginated.map(inv => (
                 <div key={inv.id} className="p-4 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono font-bold text-slate-800 dark:text-white">
@@ -447,6 +488,16 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                           <ExternalLink size={12} /> PDF
                         </a>
                       )}
+                      {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
+                        <button
+                          onClick={() => handleViewProof(inv)}
+                          disabled={loadingProofId === inv.id}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 disabled:opacity-50"
+                        >
+                          {loadingProofId === inv.id ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />}
+                          Comprovante
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
@@ -463,10 +514,244 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                 </div>
               ))}
             </div>
+
+            {/* Paginação */}
+            <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800">
+              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs">
+                <span>
+                  {Math.min((currentPage - 1) * pageSize + 1, sorted.length)}–{Math.min(currentPage * pageSize, sorted.length)} de {sorted.length}
+                </span>
+                <select
+                  value={pageSize}
+                  onChange={e => { setPageSize(Number(e.target.value)); setCurrentPage(1); }}
+                  className="ml-2 p-1 border border-slate-200 dark:border-slate-600 rounded-md bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {[25, 50, 100].map(n => <option key={n} value={n}>{n} / pág.</option>)}
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1}
+                  className="px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">«</button>
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                  className="p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">
+                  <ChevronLeft size={16} /></button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                    if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) acc.push('...');
+                    acc.push(p); return acc;
+                  }, [])
+                  .map((item, i) => item === '...'
+                    ? <span key={`e${i}`} className="px-1 text-slate-400">…</span>
+                    : <button key={item} onClick={() => setCurrentPage(item as number)}
+                        className={`min-w-[28px] px-2 py-1 rounded text-xs font-medium ${currentPage === item ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                      >{item}</button>
+                  )}
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                  className="p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">
+                  <ChevronRight size={16} /></button>
+                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}
+                  className="px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">»</button>
+              </div>
+            </div>
           </div>
         )}
       </div>
 
+      {/* Modal Comprovante */}
+      {viewingProof && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+
+            {/* Header */}
+            <div className={`p-5 text-white flex justify-between items-center ${
+              viewingProof.proof.failure_reason ? 'bg-red-600 dark:bg-red-700' : 'bg-green-600 dark:bg-green-700'
+            }`}>
+              <div>
+                <h3 className="font-bold flex items-center gap-2 text-lg">
+                  <FileText size={22} />
+                  {viewingProof.proof.failure_reason ? 'Devolução / Falha' : 'Comprovante de Entrega'}
+                </h3>
+                <p className="text-white/80 text-sm mt-1">
+                  NF-e {viewingProof.invoice.number} • R$ {viewingProof.invoice.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <button onClick={() => setViewingProof(null)} className="hover:bg-white/20 rounded-full p-2 transition-colors">
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-6 space-y-6">
+
+              {/* Banner falha/devolução */}
+              {viewingProof.proof.failure_reason && (
+                <div className="border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 p-4 rounded-lg flex items-start gap-3">
+                  <AlertTriangle className="shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block mb-1">
+                      {viewingProof.proof.return_type === 'PARTIAL' ? 'Devolução Parcial' : 'Devolução Total'}
+                    </span>
+                    <p className="text-sm">{viewingProof.proof.failure_reason}</p>
+                    {viewingProof.proof.return_type === 'PARTIAL' && viewingProof.proof.return_items && (
+                      <pre className="mt-2 text-sm whitespace-pre-wrap font-sans bg-white/50 dark:bg-black/20 p-2 rounded">
+                        {viewingProof.proof.return_items}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Recebedor + Operação */}
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm border-b dark:border-slate-700 pb-1">Dados do Recebedor</h4>
+                  <div className="flex items-start gap-3">
+                    <User className="text-slate-400 mt-1" size={18} />
+                    <div>
+                      <label className="block text-xs text-slate-500 dark:text-slate-400">Nome</label>
+                      <span className="font-medium text-slate-800 dark:text-white text-lg">{viewingProof.proof.receiver_name}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <FileText className="text-slate-400 mt-1" size={18} />
+                    <div>
+                      <label className="block text-xs text-slate-500 dark:text-slate-400">Documento (RG/CPF)</label>
+                      <span className="font-medium text-slate-800 dark:text-white">{viewingProof.proof.receiver_doc}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm border-b dark:border-slate-700 pb-1">Dados da Operação</h4>
+                  <div className="flex items-start gap-3">
+                    <Clock className="text-slate-400 mt-1" size={18} />
+                    <div>
+                      <label className="block text-xs text-slate-500 dark:text-slate-400">Data/Hora</label>
+                      <span className="font-medium text-slate-800 dark:text-white">
+                        {new Date(viewingProof.proof.delivered_at).toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <MapIcon className="text-slate-400 mt-1" size={18} />
+                    <div>
+                      <label className="block text-xs text-slate-500 dark:text-slate-400">Localização (GPS)</label>
+                      <span className="font-medium text-slate-800 dark:text-white block">
+                        {viewingProof.proof.geo_lat ? `${viewingProof.proof.geo_lat}, ${viewingProof.proof.geo_long}` : 'Não capturado'}
+                      </span>
+                      {viewingProof.proof.geo_lat && (
+                        <a
+                          href={`https://www.google.com/maps?q=${viewingProof.proof.geo_lat},${viewingProof.proof.geo_long}`}
+                          target="_blank" rel="noreferrer"
+                          className="text-blue-600 dark:text-blue-400 hover:underline text-xs"
+                        >
+                          Ver no Google Maps
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Imagens */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t dark:border-slate-700">
+                <div>
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Assinatura Digital</h4>
+                  <div className="border border-slate-200 dark:border-slate-600 rounded-lg bg-white p-2 h-40 flex items-center justify-center shadow-sm">
+                    {viewingProof.proof.signature_data
+                      ? <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" />
+                      : <span className="text-slate-400 italic text-sm">Não assinada</span>}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Foto / Evidência</h4>
+                  <div
+                    className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                    onClick={() => { if (viewingProof.proof.photo_url) { setZoomedImage(viewingProof.proof.photo_url); setZoomedScale(1); } }}
+                  >
+                    {viewingProof.proof.photo_url
+                      ? <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" />
+                      : <span className="text-slate-400 italic text-sm">Sem foto</span>}
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Canhoto Físico</h4>
+                  <div
+                    className="border border-slate-200 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 h-40 flex items-center justify-center overflow-hidden shadow-sm cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all"
+                    onClick={() => { if (viewingProof.proof.photo_stub_url) { setZoomedImage(viewingProof.proof.photo_stub_url); setZoomedScale(1); } }}
+                  >
+                    {viewingProof.proof.photo_stub_url
+                      ? <img src={viewingProof.proof.photo_stub_url} alt="Canhoto" className="w-full h-full object-cover" />
+                      : <span className="text-slate-400 italic text-sm">Não anexado</span>}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Rodapé */}
+            <div className="bg-slate-50 dark:bg-slate-900 p-4 border-t dark:border-slate-700 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  const w = window.open('', '_blank', 'width=900,height=800');
+                  if (!w) return alert('Permita pop-ups para imprimir.');
+                  const { invoice, proof } = viewingProof;
+                  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comprovante NF-e ${invoice.number}</title>
+                    <style>body{font-family:sans-serif;padding:24px;color:#1e293b}h1{font-size:20px;margin-bottom:4px}
+                    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:16px 0}
+                    .label{font-size:11px;color:#64748b;text-transform:uppercase}
+                    .value{font-size:15px;font-weight:600;margin-top:2px}
+                    .imgs{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+                    .imgs img{width:100%;height:160px;object-fit:cover;border:1px solid #e2e8f0;border-radius:8px}
+                    .imgs h4{font-size:11px;text-transform:uppercase;color:#64748b;margin-bottom:6px}
+                    @media print{button{display:none}}</style></head><body>
+                    <h1>Comprovante de Entrega Digital</h1>
+                    <p style="color:#64748b;font-size:13px">NF-e ${invoice.number} • Série ${invoice.series} • Gerado em ${new Date().toLocaleString('pt-BR')}</p>
+                    <div class="grid">
+                      <div><div class="label">Recebedor</div><div class="value">${proof.receiver_name}</div></div>
+                      <div><div class="label">Documento</div><div class="value">${proof.receiver_doc}</div></div>
+                      <div><div class="label">Data/Hora</div><div class="value">${new Date(proof.delivered_at).toLocaleString('pt-BR')}</div></div>
+                      <div><div class="label">GPS</div><div class="value">${proof.geo_lat ? `${proof.geo_lat}, ${proof.geo_long}` : 'Não capturado'}</div></div>
+                    </div>
+                    <div class="imgs">
+                      <div><h4>Assinatura</h4>${proof.signature_data ? `<img src="${proof.signature_data}" style="height:150px;object-fit:contain" />` : '<p>Não assinada</p>'}</div>
+                      <div><h4>Foto / Evidência</h4>${proof.photo_url ? `<img src="${proof.photo_url}" />` : '<p>Sem foto</p>'}</div>
+                      <div><h4>Canhoto Físico</h4>${proof.photo_stub_url ? `<img src="${proof.photo_stub_url}" />` : '<p>Não anexado</p>'}</div>
+                    </div>
+                    <script>window.onload=()=>window.print()</script></body></html>`);
+                  w.document.close();
+                }}
+                className="flex items-center gap-2 px-5 py-2 bg-slate-800 dark:bg-white text-white dark:text-slate-900 rounded-lg hover:bg-slate-700 transition-colors font-bold"
+              >
+                <Printer size={16} /> Imprimir / PDF
+              </button>
+              <button
+                onClick={() => setViewingProof(null)}
+                className="px-5 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 font-medium"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Zoom */}
+      {zoomedImage && (
+        <div className="fixed inset-0 z-[60] bg-black/90 flex flex-col items-center justify-center" onClick={() => setZoomedImage(null)}>
+          <div className="flex gap-3 mb-3" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setZoomedScale(s => Math.min(s + 0.25, 4))} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"><ZoomIn size={18} /></button>
+            <button onClick={() => setZoomedScale(s => Math.max(s - 0.25, 0.5))} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"><ZoomOut size={18} /></button>
+            <button onClick={() => setZoomedImage(null)} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"><X size={18} /></button>
+          </div>
+          <img
+            src={zoomedImage}
+            alt="Zoom"
+            style={{ transform: `scale(${zoomedScale})`, transition: 'transform 0.2s' }}
+            className="max-w-full max-h-[80vh] object-contain rounded-lg"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 };
