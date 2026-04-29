@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__mcp-obsidian__obsidian_simple_search"
+    ]
+  }
+}

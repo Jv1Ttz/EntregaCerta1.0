@@ -130,6 +130,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const wakeLockRef = useRef<any>(null);
   const watchIdRef = useRef<string | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
+  const wakeLockIntervalRef = useRef<number | null>(null);
 
   // Wake Lock (Tela Ativa)
   const requestWakeLock = async () => {
@@ -145,10 +146,17 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   useEffect(() => {
     refreshData();
-    
+
     if (routeStarted) {
         startTracking();
         requestWakeLock();
+
+        // Reaquire o Wake Lock a cada 30s caso ele tenha sido perdido (tela apagou, app foi pro background)
+        wakeLockIntervalRef.current = window.setInterval(() => {
+            if (!wakeLockRef.current || wakeLockRef.current.released) {
+                requestWakeLock();
+            }
+        }, 30000);
     }
 
     const handleVisibilityChange = () => {
@@ -166,10 +174,11 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         }
     }, 10000);
-    
+
     return () => {
         stopTracking();
         if (notifIntervalRef.current) clearInterval(notifIntervalRef.current);
+        if (wakeLockIntervalRef.current) clearInterval(wakeLockIntervalRef.current);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         if (wakeLockRef.current) wakeLockRef.current.release();
     };
@@ -182,8 +191,13 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
         localStorage.setItem(`route_started_date_${driverId}`, today);
         setRouteStarted(true);
         refreshData();
-        startTracking();
-        requestWakeLock();
+
+        // Orienta o motorista a desativar otimização de bateria para garantir GPS contínuo
+        notify(
+            "Importante: GPS em Background",
+            "Para o rastreio funcionar com a tela desligada, vá em Configurações > Aplicativos > EntregaCerta > Bateria e selecione 'Sem restrições'.",
+            "INFO"
+        );
     }
   };
 
@@ -196,18 +210,17 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   // --- FUNÇÕES DE GPS (PLUGIN BACKGROUND) ---
   
   const startTracking = async () => {
+    // Guard: não cria um segundo watcher se já existe um ativo
+    if (watchIdRef.current) return;
+
     try {
-      // 1. Pede permissão
-      // O plugin vai abrir um pop-up nativo. O usuário deve escolher "PERMITIR O TEMPO TODO".
-      
-      // 2. Adiciona o "Vigia" (Watcher)
       const watcherId = await BackgroundGeolocation.addWatcher(
         {
-          backgroundMessage: "Rastreando localização para entrega.",
-          backgroundTitle: "EntregaCerta em execução",
+          backgroundMessage: "EntregaCerta está rastreando sua localização.",
+          backgroundTitle: "EntregaCerta — Rota ativa",
           requestPermissions: true,
-          stale: true, // Não aceita localização velha em cache
-          distanceFilter: 5 // Só atualiza se o motorista andar 10 metros (Economiza bateria/dados)
+          stale: false, // Não aceita localização velha em cache
+          distanceFilter: 10 // Atualiza a cada 10 metros
         },
         (location, error) => {
           if (error) {

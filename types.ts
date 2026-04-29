@@ -114,11 +114,12 @@ export interface InvoiceItem {
   value: number;
 }
 
-export type ViewState = 
+export type ViewState =
   | { type: 'ROLE_SELECT' }
   | { type: 'ADMIN_LOGIN' }
   | { type: 'ADMIN_DASHBOARD' }
   | { type: 'ADMIN_AUDIT' }          // nova tela do Administrador (auditoria / notas excluídas)
   | { type: 'DRIVER_LOGIN' }
   | { type: 'DRIVER_LIST'; driverId: string }
-  | { type: 'DRIVER_ACTION'; driverId: string; invoiceId: string };
+  | { type: 'DRIVER_ACTION'; driverId: string; invoiceId: string }
+  | { type: 'SELLER_VIEW' };

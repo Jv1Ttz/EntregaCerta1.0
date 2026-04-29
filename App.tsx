@@ -5,7 +5,8 @@ import { ViewState } from './types';
 import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
 import { AdminAuditView } from './components/AdminAuditView';
-import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown } from 'lucide-react';
+import { SellerView } from './components/SellerView';
+import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewState>({ type: 'ROLE_SELECT' });
@@ -147,8 +148,23 @@ const App: React.FC = () => {
                     </div>
                  </button>
 
+                 {/* Card Vendedor */}
+                 <button
+                    type="button"
+                    onClick={() => setView({ type: 'SELLER_VIEW' })}
+                    className="w-full group bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 transition-all p-6 rounded-2xl flex items-center justify-between shadow-xl border border-transparent dark:border-slate-700"
+                 >
+                    <div className="text-left">
+                       <h3 className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400">Sou Vendedor</h3>
+                       <p className="text-slate-500 dark:text-slate-400 mt-1">Consultar status dos pedidos.</p>
+                    </div>
+                    <div className="h-14 w-14 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-110 transition-transform">
+                       <ShoppingBag size={28} />
+                    </div>
+                 </button>
+
                  {/* Novo card de futura funcionalidade */}
-                 <button 
+                 <button
                     type="button"
                     onClick={() => setView({ type: 'ADMIN_AUDIT' })}
                     className="w-full group bg-slate-900/40 dark:bg-slate-900/40 border border-dashed border-slate-600 hover:border-slate-400 transition-all p-6 rounded-2xl flex items-center justify-between shadow-inner"
@@ -272,15 +288,20 @@ const App: React.FC = () => {
 
       case 'DRIVER_LIST':
         return (
-          <DriverView 
-            driverId={view.driverId} 
+          <DriverView
+            driverId={view.driverId}
             onLogout={() => setView({ type: 'ROLE_SELECT' })}
             // ADICIONADO: Passando as props aqui também
             toggleTheme={toggleTheme}
             theme={theme}
           />
         );
-        
+
+      case 'SELLER_VIEW':
+        return (
+          <SellerView onBack={() => setView({ type: 'ROLE_SELECT' })} />
+        );
+
       default:
         return <div>Unknown View</div>;
     }
