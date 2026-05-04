@@ -419,7 +419,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     return invoice;
   };
 
-  // 2. Ação de Clique no Veículo (Com Loading e FlyTo)
+  // 2a. Ação de Clique no Driver (legado — mantido para compatibilidade)
   const handleSelectDriver = async (driverId: string, driverLat: number, driverLng: number) => {
     setSelectedDriverId(driverId);
     mapRef.current?.flyTo({ center: [driverLng, driverLat], zoom: 14, duration: 2000 });
@@ -427,13 +427,24 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
       i.driver_id === driverId &&
       (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
     );
-
-    console.log(`Geocodificando ${driverInvoices.length} notas...`);
-
-    // Processa todas em paralelo
     const updatedInvoices = await Promise.all(driverInvoices.map(geocodeInvoice));
-    
-    // Atualiza a tela imediatamente
+    setInvoices(prev => prev.map(inv => {
+      const updated = updatedInvoices.find(u => u.id === inv.id);
+      return updated || inv;
+    }));
+  };
+
+  // 2b. Ação de Clique no Veículo — geocodifica notas por vehicle_id
+  const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number) => {
+    setSelectedVehicleId(vehicleId);
+    if (lat && lng) {
+      mapRef.current?.flyTo({ center: [lng, lat], zoom: 13, duration: 2000 });
+    }
+    const vehicleInvoices = invoices.filter(i =>
+      i.vehicle_id === vehicleId &&
+      (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
+    );
+    const updatedInvoices = await Promise.all(vehicleInvoices.map(geocodeInvoice));
     setInvoices(prev => prev.map(inv => {
       const updated = updatedInvoices.find(u => u.id === inv.id);
       return updated || inv;
@@ -2569,6 +2580,9 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
       {/* Controladoria */}
       {showControladoria && (() => {
+        const allTodayInvoices = invoices.filter(i => i.created_at?.startsWith(controlDate));
+        const semVeiculo = allTodayInvoices.filter(i => !i.vehicle_id).length;
+
         const todayVehicles = vehicles.map(v => {
           const vInvoices = invoices.filter(i => i.vehicle_id === v.id && i.created_at?.startsWith(controlDate));
           const driver = (() => {
@@ -2643,16 +2657,18 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </div>
 
               {/* Totais gerais */}
-              <div className="grid grid-cols-4 gap-4 p-5 border-b border-slate-200 dark:border-slate-700">
+              <div className="grid grid-cols-5 gap-4 p-5 border-b border-slate-200 dark:border-slate-700">
                 {[
-                  { label: 'Total de Notas', value: todayVehicles.reduce((s, x) => s + x.vInvoices.length, 0), color: 'text-slate-700 dark:text-white' },
-                  { label: 'Entregues', value: todayVehicles.reduce((s, x) => s + x.delivered, 0), color: 'text-green-600' },
-                  { label: 'Pendentes', value: todayVehicles.reduce((s, x) => s + x.pending, 0), color: 'text-orange-500' },
-                  { label: 'Valor Total', value: `R$ ${todayVehicles.reduce((s, x) => s + x.totalValue, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, color: 'text-blue-600' },
-                ].map(({ label, value, color }) => (
+                  { label: 'Importadas', value: allTodayInvoices.length, color: 'text-slate-700 dark:text-white', sub: semVeiculo > 0 ? `${semVeiculo} sem veículo` : null },
+                  { label: 'Distribuídas', value: todayVehicles.reduce((s, x) => s + x.vInvoices.length, 0), color: 'text-indigo-600', sub: null },
+                  { label: 'Entregues', value: todayVehicles.reduce((s, x) => s + x.delivered, 0), color: 'text-green-600', sub: null },
+                  { label: 'Pendentes', value: todayVehicles.reduce((s, x) => s + x.pending, 0), color: 'text-orange-500', sub: null },
+                  { label: 'Valor Total', value: `R$ ${todayVehicles.reduce((s, x) => s + x.totalValue, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, color: 'text-blue-600', sub: null },
+                ].map(({ label, value, color, sub }) => (
                   <div key={label} className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 text-center border border-slate-200 dark:border-slate-700">
                     <p className="text-xs text-slate-500 mb-1">{label}</p>
                     <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                    {sub && <p className="text-[10px] text-red-500 font-medium mt-1">{sub}</p>}
                   </div>
                 ))}
               </div>
@@ -2747,14 +2763,6 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         const lastUpdate = hasLocation ? new Date(v.last_location!.updated_at) : null;
                         const isOnline = lastUpdate && (new Date().getTime() - lastUpdate.getTime() < 5 * 60 * 1000);
                         const isSelected = selectedVehicleId === v.id;
-
-                        // Motorista atualmente vinculado ao veículo (invoice ativa)
-                        const activeInvoice = invoices.find(i =>
-                          i.vehicle_id === v.id &&
-                          (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
-                        );
-                        const activeDriver = activeInvoice ? drivers.find(d => d.id === activeInvoice.driver_id) : null;
-
                         const pendingCount = invoices.filter(i =>
                           i.vehicle_id === v.id &&
                           i.status !== 'DELIVERED' &&
@@ -2767,10 +2775,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                              key={v.id}
                              onClick={() => {
                                if (!hasLocation) return;
-                               setSelectedVehicleId(v.id);
-                               if (activeDriver) setSelectedDriverId(activeDriver.id);
-                               else setSelectedDriverId(null);
-                               mapRef.current?.flyTo({ center: [v.last_location!.lng, v.last_location!.lat], zoom: 14, duration: 2000 });
+                               handleSelectVehicle(v.id, v.last_location!.lat, v.last_location!.lng);
                              }}
                              className={`p-3 rounded-lg border transition-all cursor-pointer flex items-center justify-between group
                                 ${isSelected ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-500 ring-1 ring-blue-500' : ''}
@@ -2785,19 +2790,17 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                  </div>
                                  <div>
                                     <span className="font-bold text-slate-700 dark:text-slate-200 text-sm block">{v.plate}</span>
-                                    <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                                    <span className="text-sm text-slate-400 dark:text-slate-500 block">{v.model}</span>
+                                    <span className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
                                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></div>
                                        {isOnline ? 'Sinal Ativo' : 'Offline'}
+                                       {v.last_location?.speed_kmh !== undefined && isOnline && (
+                                         <span className="text-slate-400">{v.last_location.speed_kmh} km/h</span>
+                                       )}
                                        {v.last_location?.source === 'salvadorsat' && (
                                          <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 px-1 rounded font-semibold">SAT</span>
                                        )}
-                                       {v.last_location?.source === 'app' && (
-                                         <span className="bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400 px-1 rounded font-semibold">APP</span>
-                                       )}
                                     </span>
-                                    {activeDriver && (
-                                      <span className="text-[10px] text-slate-400 dark:text-slate-500 block">{activeDriver.name}</span>
-                                    )}
                                  </div>
                               </div>
                               <span className="text-xs font-bold bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded text-slate-600 dark:text-slate-300">
@@ -2832,11 +2835,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     {vehicles.map(v => {
                         if (!v.last_location) return null;
                         const isSelected = selectedVehicleId === v.id;
-                        const activeInvoice = invoices.find(i =>
-                          i.vehicle_id === v.id &&
-                          (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
-                        );
-                        const activeDriver = activeInvoice ? drivers.find(d => d.id === activeInvoice.driver_id) : null;
+                        const isOnline = (new Date().getTime() - new Date(v.last_location.updated_at).getTime()) < 5 * 60 * 1000;
 
                         return (
                             <Marker
@@ -2846,17 +2845,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                 anchor="bottom"
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
-                                    setSelectedVehicleId(v.id);
-                                    if (activeDriver) setSelectedDriverId(activeDriver.id);
-                                    else setSelectedDriverId(null);
-                                    mapRef.current?.flyTo({ center: [v.last_location!.lng, v.last_location!.lat], zoom: 14, duration: 2000 });
+                                    handleSelectVehicle(v.id, v.last_location!.lat, v.last_location!.lng);
                                 }}
                             >
                                 <div className={`relative group cursor-pointer flex flex-col items-center transition-all duration-500 ${isSelected ? 'scale-125 z-50' : 'scale-100 z-10'}`}>
                                     <div className="mb-1 px-2 py-0.5 bg-white/90 dark:bg-black/80 backdrop-blur text-slate-800 dark:text-white text-[10px] font-bold rounded shadow-sm border border-slate-200 dark:border-slate-600 whitespace-nowrap">
-                                       {v.plate}{activeDriver ? ` · ${activeDriver.name.split(' ')[0]}` : ''}
+                                       {v.plate}
                                     </div>
-                                    <div className={`p-2 rounded-full shadow-xl border-2 ${isSelected ? 'bg-blue-600 border-white ring-4 ring-blue-500/30' : 'bg-slate-500 border-slate-300'}`}>
+                                    <div className={`p-2 rounded-full shadow-xl border-2 ${isSelected ? 'bg-blue-600 border-white ring-4 ring-blue-500/30' : isOnline ? 'bg-slate-600 border-slate-300' : 'bg-slate-400 border-slate-200'}`}>
                                         <Truck size={20} className="text-white" />
                                     </div>
                                 </div>

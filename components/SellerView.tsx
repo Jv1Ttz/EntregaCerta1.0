@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
-import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite } from 'lucide-react';
+import Map, { Marker, NavigationControl } from 'react-map-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
 
 interface SellerViewProps {
   onBack: () => void;
@@ -53,6 +56,12 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'notas' | 'frota'>('notas');
+  const [fleetRefreshing, setFleetRefreshing] = useState(false);
+  const [lastFleetSync, setLastFleetSync] = useState<Date | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const mapRef = useRef<any>(null);
 
   // ── dados ──────────────────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -89,6 +98,54 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
       ([inv, drv, veh]) => { setInvoices(inv); setDrivers(drv); setVehicles(veh); setLoading(false); }
     );
   }, [authenticated]);
+
+  // Geocodifica notas pendentes de um veículo e atualiza o estado local
+  const geocodeInvoice = async (invoice: Invoice): Promise<Invoice> => {
+    if (invoice.lat && invoice.lng) return invoice;
+    try {
+      const clean = invoice.customer_address.split('||')[0];
+      const query = encodeURIComponent(`${clean}, Brasil`);
+      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${query}.json?access_token=${MAPBOX_TOKEN}&limit=1`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.features?.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        return { ...invoice, lat, lng };
+      }
+    } catch { /* silencioso */ }
+    return invoice;
+  };
+
+  const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number) => {
+    setSelectedVehicleId(prev => prev === vehicleId ? null : vehicleId);
+    if (lat && lng) mapRef.current?.flyTo({ center: [lng, lat], zoom: 13, duration: 1500 });
+    const pending = invoices.filter(i =>
+      i.vehicle_id === vehicleId &&
+      (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
+    );
+    const updated = await Promise.all(pending.map(geocodeInvoice));
+    setInvoices(prev => prev.map(inv => updated.find(u => u.id === inv.id) ?? inv));
+  };
+
+  // Refresh da frota (manual ou automático)
+  const refreshFleet = async () => {
+    setFleetRefreshing(true);
+    try {
+      const veh = await db.getVehicles();
+      setVehicles(veh);
+      setLastFleetSync(new Date());
+    } finally {
+      setFleetRefreshing(false);
+    }
+  };
+
+  // Dispara refreshFleet a cada 60s quando a aba frota está ativa
+  useEffect(() => {
+    if (!authenticated || activeTab !== 'frota') return;
+    refreshFleet(); // sincroniza imediatamente ao entrar na aba
+    const interval = setInterval(refreshFleet, 60_000);
+    return () => clearInterval(interval);
+  }, [authenticated, activeTab]);
 
   const driverMap = useMemo(() => Object.fromEntries(drivers.map(d => [d.id, d.name])), [drivers]);
   const vehicleMap = useMemo(() => Object.fromEntries(vehicles.map(v => [v.id, `${v.plate} — ${v.model}`])), [vehicles]);
@@ -150,15 +207,33 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   }, [sorted, currentPage, pageSize]);
 
   // ── handlers ───────────────────────────────────────────────────────────────
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const configured = import.meta.env.VITE_SELLER_PASSWORD as string | undefined;
-    if (configured && passwordInput === configured) {
-      setAuthenticated(true);
-      setPasswordError(false);
-    } else {
+    setLoginLoading(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+      const res = await fetch(`${supabaseUrl}/functions/v1/verify-seller-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify({ password: passwordInput }),
+      });
+      const data = await res.json();
+      if (data.valid) {
+        setAuthenticated(true);
+        setPasswordError(false);
+      } else {
+        setPasswordError(true);
+        setPasswordInput('');
+      }
+    } catch {
       setPasswordError(true);
       setPasswordInput('');
+    } finally {
+      setLoginLoading(false);
     }
   };
 
@@ -206,9 +281,10 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             </div>
             <button
               type="submit"
-              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm transition-colors"
+              disabled={loginLoading}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
             >
-              Entrar
+              {loginLoading ? <><Loader2 size={16} className="animate-spin" /> Verificando...</> : 'Entrar'}
             </button>
             <button
               type="button"
@@ -268,7 +344,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
       {/* Header */}
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center gap-4">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
           <button
             onClick={onBack}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
@@ -280,19 +356,218 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
               <Package size={20} />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-slate-800 dark:text-white leading-tight">
-                Consulta de Pedidos
-              </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Visão do Vendedor</p>
+              <h1 className="text-lg font-bold text-slate-800 dark:text-white leading-tight">Visão do Vendedor</h1>
             </div>
           </div>
+
+          {/* Abas */}
+          <div className="flex items-center gap-1 ml-6 bg-slate-100 dark:bg-slate-700 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveTab('notas')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'notas' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+            >
+              <FileText size={15} /> Notas
+            </button>
+            <button
+              onClick={() => setActiveTab('frota')}
+              className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'frota' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+            >
+              <Satellite size={15} /> Frota
+            </button>
+          </div>
+
           <div className="ml-auto text-xs text-slate-400 dark:text-slate-500 font-mono">
-            {loading ? '...' : `${filtered.length} de ${invoices.length} notas`}
+            {activeTab === 'notas' && (loading ? '...' : `${filtered.length} de ${invoices.length} notas`)}
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+      {/* Aba Frota */}
+      {activeTab === 'frota' && (
+        <div className="flex h-[calc(100vh-64px)]">
+          {/* Lista lateral */}
+          <div className="w-72 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex flex-col overflow-y-auto">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                  <Satellite size={18} className="text-blue-500" /> Frota em Tempo Real
+                </h3>
+                <button
+                  onClick={refreshFleet}
+                  disabled={fleetRefreshing}
+                  title="Atualizar frota"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors disabled:opacity-50"
+                >
+                  <RotateCw size={15} className={fleetRefreshing ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                {lastFleetSync
+                  ? `Última sync: ${lastFleetSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                  : 'Sincronizando...'}
+              </p>
+            </div>
+            <div className="p-2 space-y-2">
+              {vehicles.map(v => {
+                const hasLocation = !!v.last_location;
+                const lastUpdate = hasLocation ? new Date(v.last_location!.updated_at) : null;
+                const isOnline = lastUpdate && (new Date().getTime() - lastUpdate.getTime() < 5 * 60 * 1000);
+                const pendingCount = invoices.filter(i =>
+                  i.vehicle_id === v.id &&
+                  i.status !== 'DELIVERED' &&
+                  i.status !== 'RETURNED' &&
+                  i.status !== 'FAILED'
+                ).length;
+                const isSelected = selectedVehicleId === v.id;
+
+                return (
+                  <div
+                    key={v.id}
+                    onClick={() => {
+                      if (isSelected) { setSelectedVehicleId(null); return; }
+                      handleSelectVehicle(v.id, v.last_location?.lat, v.last_location?.lng);
+                    }}
+                    className={`p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer
+                      ${isSelected
+                        ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-400 dark:border-blue-500 shadow-sm'
+                        : hasLocation
+                          ? 'hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-100 dark:border-slate-700 hover:border-blue-200'
+                          : 'opacity-50 border-transparent'}
+                    `}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white shadow-sm ${isSelected ? 'bg-blue-600 ring-2 ring-blue-300' : isOnline ? 'bg-blue-500' : 'bg-slate-400'}`}>
+                        <Truck size={16} />
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-700 dark:text-slate-200 text-sm block">{v.plate}</span>
+                        <span className="text-xs text-slate-400 block">{v.model}</span>
+                        <span className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`} />
+                          {isOnline ? 'Online' : 'Offline'}
+                          {v.last_location?.speed_kmh !== undefined && isOnline && (
+                            <span className="ml-1">{v.last_location.speed_kmh} km/h</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-bold px-2 py-1 rounded ${pendingCount > 0 ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400' : 'bg-slate-100 dark:bg-slate-700 text-slate-400'}`}>
+                      {pendingCount}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Mapa */}
+          <div className="flex-1">
+            <Map
+              ref={mapRef}
+              initialViewState={{ latitude: -12.9777, longitude: -38.5016, zoom: 11 }}
+              style={{ width: '100%', height: '100%' }}
+              mapStyle="mapbox://styles/mapbox/streets-v12"
+              mapboxAccessToken={MAPBOX_TOKEN}
+            >
+              <NavigationControl position="bottom-right" />
+              {/* Marcadores de veículos */}
+              {vehicles.map(v => {
+                if (!v.last_location) return null;
+                const isOnline = (new Date().getTime() - new Date(v.last_location.updated_at).getTime()) < 5 * 60 * 1000;
+                const isSelected = selectedVehicleId === v.id;
+                return (
+                  <Marker
+                    key={v.id}
+                    latitude={v.last_location.lat}
+                    longitude={v.last_location.lng}
+                    anchor="bottom"
+                  >
+                    <div
+                      className={`flex flex-col items-center cursor-pointer transition-transform duration-300 ${isSelected ? 'scale-125 z-50' : 'scale-100'}`}
+                      onClick={() => {
+                        if (isSelected) { setSelectedVehicleId(null); return; }
+                        handleSelectVehicle(v.id, v.last_location!.lat, v.last_location!.lng);
+                      }}
+                    >
+                      <div className="mb-1 px-2 py-0.5 bg-white/90 dark:bg-black/80 backdrop-blur text-slate-800 dark:text-white text-[10px] font-bold rounded shadow-sm border border-slate-200 whitespace-nowrap">
+                        {v.plate}
+                      </div>
+                      <div className={`p-2 rounded-full shadow-xl border-2 border-white ${isSelected ? 'bg-blue-600 ring-4 ring-blue-400/40' : isOnline ? 'bg-blue-500' : 'bg-slate-400'}`}>
+                        <Truck size={18} className="text-white" />
+                      </div>
+                    </div>
+                  </Marker>
+                );
+              })}
+
+              {/* Pins de notas pendentes do veículo selecionado */}
+              {selectedVehicleId && (() => {
+                const grouped: Record<string, Invoice[]> = {};
+                invoices
+                  .filter(inv =>
+                    inv.vehicle_id === selectedVehicleId &&
+                    inv.lat && inv.lng &&
+                    inv.status !== 'DELIVERED' &&
+                    inv.status !== 'RETURNED' &&
+                    inv.status !== 'FAILED'
+                  )
+                  .forEach(inv => {
+                    const key = `${inv.lat},${inv.lng}`;
+                    if (!grouped[key]) grouped[key] = [];
+                    grouped[key].push(inv);
+                  });
+
+                return Object.values(grouped).map((group, idx) => {
+                  const main = group[0];
+                  const count = group.length;
+                  return (
+                    <Marker key={`pin-${idx}`} latitude={main.lat!} longitude={main.lng!} anchor="bottom">
+                      <div className="group relative cursor-pointer">
+                        {/* Pin */}
+                        <div className={`relative flex items-center justify-center rounded-full shadow-md border-2 border-white transition-transform hover:scale-110
+                          ${count > 1 ? 'bg-purple-600 w-8 h-8' : 'bg-orange-500 w-7 h-7 p-1.5'}`}
+                        >
+                          {count > 1
+                            ? <span className="text-white font-bold text-xs">{count}</span>
+                            : <Package size={14} className="text-white" />
+                          }
+                          {count > 1 && (
+                            <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-500 rounded-full border border-white" />
+                          )}
+                        </div>
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white text-[10px] p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-[60]">
+                          <div className="border-b border-slate-700 pb-1 mb-1">
+                            <span className="font-bold block truncate text-xs text-yellow-400">{main.customer_name}</span>
+                            <span className="opacity-70">{count} {count === 1 ? 'entrega' : 'entregas'} aqui</span>
+                          </div>
+                          <div className="max-h-24 overflow-y-auto space-y-1">
+                            {group.map(inv => (
+                              <div key={inv.id} className="flex justify-between items-center">
+                                <span className="opacity-90 font-mono">NF {inv.number}</span>
+                                <span className="text-green-400 font-bold">R$ {inv.value.toLocaleString('pt-BR')}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {count > 1 && (
+                            <div className="border-t border-slate-700 mt-1 pt-1 text-right font-bold text-green-300">
+                              Total: R$ {group.reduce((acc, i) => acc + i.value, 0).toLocaleString('pt-BR')}
+                            </div>
+                          )}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900" />
+                        </div>
+                      </div>
+                    </Marker>
+                  );
+                });
+              })()}
+            </Map>
+          </div>
+        </div>
+      )}
+
+      {/* Aba Notas */}
+      {activeTab === 'notas' && (<div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
         {/* Filtros — mesmo padrão do gestor */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 shadow-sm">
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
@@ -612,7 +887,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             </div>
           </div>
         )}
-      </div>
+      </div>)}
 
       {/* Modal Comprovante */}
       {viewingProof && (
