@@ -18,6 +18,13 @@ export interface Vehicle {
   cubagem?: number;
   /** Peso bruto total máximo permitido (kg) — PBT/lotação total */
   max_weight?: number;
+  last_location?: {
+    lat: number;
+    lng: number;
+    updated_at: string;
+    source?: 'salvadorsat' | 'app';
+    speed_kmh?: number;
+  };
 }
 
 export interface Driver {
@@ -28,6 +35,7 @@ export interface Driver {
     lat: number;
     lng: number;
     updated_at: string;
+    source?: 'salvadorsat' | 'app';
   };
 }
 

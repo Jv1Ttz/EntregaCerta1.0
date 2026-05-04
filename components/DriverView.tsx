@@ -239,9 +239,11 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           const lng = location.longitude;
           
           setCurrentLocation({ lat, lng });
-          
-          // Envia para o banco
+
+          // Atualiza localização do motorista e do veículo (se houver)
           db.updateDriverLocation(driverId, lat, lng);
+          const vehicleId = pendingInvoices[0]?.vehicle_id;
+          if (vehicleId) db.updateVehicleLocation(vehicleId, lat, lng);
         }
       );
       

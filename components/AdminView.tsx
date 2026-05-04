@@ -32,6 +32,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   const [showScanner, setShowScanner] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
@@ -45,6 +46,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
   const [newVehicleCubagem, setNewVehicleCubagem] = useState<string>('');
   const [newVehicleMaxWeight, setNewVehicleMaxWeight] = useState<string>('');
   const [showFleetMonitor, setShowFleetMonitor] = useState(false);
+  const [showControladoria, setShowControladoria] = useState(false);
+  const [controlDate, setControlDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [showSettings, setShowSettings] = useState(false);
   
   const [viewingProof, setViewingProof] = useState<{invoice: Invoice, proof: DeliveryProof} | null>(null);
@@ -416,19 +419,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
     return invoice;
   };
 
-  // 2. Ação de Clique no Motorista (Com Loading e FlyTo)
+  // 2. Ação de Clique no Veículo (Com Loading e FlyTo)
   const handleSelectDriver = async (driverId: string, driverLat: number, driverLng: number) => {
     setSelectedDriverId(driverId);
-    
-    // Feedback visual (se tiver a função notify, senão pode comentar)
-    // notify("Carregando Rotas", "Verificando localizações...", "INFO");
-
-    // Voa para o motorista
     mapRef.current?.flyTo({ center: [driverLng, driverLat], zoom: 14, duration: 2000 });
-
-    // Filtra notas pendentes desse motorista
-    const driverInvoices = invoices.filter(i => 
-      i.driver_id === driverId && 
+    const driverInvoices = invoices.filter(i =>
+      i.driver_id === driverId &&
       (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
     );
 
@@ -1539,6 +1535,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               <Satellite className="h-4 w-4" /> <span className="font-medium text-sm">Monitorar Frota</span>
             </button>
             
+            <button onClick={() => setShowControladoria(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
+              <LayoutDashboard className="h-4 w-4" /> <span className="font-medium text-sm">Controladoria</span>
+            </button>
+
             <button onClick={() => setShowAddVehicle(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
               <Truck className="h-4 w-4" /> <span className="font-medium text-sm">Gerir Veículos</span>
             </button>
@@ -2567,6 +2567,166 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
       )}
 
+      {/* Controladoria */}
+      {showControladoria && (() => {
+        const todayVehicles = vehicles.map(v => {
+          const vInvoices = invoices.filter(i => i.vehicle_id === v.id && i.created_at?.startsWith(controlDate));
+          const driver = (() => {
+            const active = vInvoices.find(i => i.status === 'PENDING' || i.status === 'IN_PROGRESS');
+            const any = vInvoices[0];
+            const inv = active ?? any;
+            return inv ? drivers.find(d => d.id === inv.driver_id) : null;
+          })();
+          const delivered = vInvoices.filter(i => i.status === 'DELIVERED').length;
+          const pending   = vInvoices.filter(i => i.status === 'PENDING' || i.status === 'IN_PROGRESS').length;
+          const returned  = vInvoices.filter(i => i.status === 'RETURNED' || i.status === 'FAILED').length;
+          const totalValue = vInvoices.reduce((s, i) => s + (i.value ?? 0), 0);
+          const isOnline = v.last_location && (new Date().getTime() - new Date(v.last_location.updated_at).getTime() < 5 * 60 * 1000);
+          return { v, vInvoices, driver, delivered, pending, returned, totalValue, isOnline };
+        });
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700">
+              {/* Header */}
+              <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-3">
+                  <LayoutDashboard size={22} className="text-blue-500" />
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800 dark:text-white">Controladoria</h2>
+                    <p className="text-xs text-slate-500">
+                      {new Date(controlDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const d = new Date(controlDate + 'T12:00:00');
+                      d.setDate(d.getDate() - 1);
+                      setControlDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                    title="Dia anterior"
+                  >
+                    <ArrowDown size={16} />
+                  </button>
+                  <input
+                    type="date"
+                    value={controlDate}
+                    max={new Date().toISOString().split('T')[0]}
+                    onChange={e => setControlDate(e.target.value)}
+                    className="px-3 py-1.5 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={() => {
+                      const d = new Date(controlDate + 'T12:00:00');
+                      d.setDate(d.getDate() + 1);
+                      const today = new Date().toISOString().split('T')[0];
+                      if (d.toISOString().split('T')[0] <= today) setControlDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors disabled:opacity-40"
+                    title="Próximo dia"
+                  >
+                    <ArrowUp size={16} />
+                  </button>
+                  <button
+                    onClick={() => setControlDate(new Date().toISOString().split('T')[0])}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                  >
+                    Hoje
+                  </button>
+                  <button onClick={() => setShowControladoria(false)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 ml-2">
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Totais gerais */}
+              <div className="grid grid-cols-4 gap-4 p-5 border-b border-slate-200 dark:border-slate-700">
+                {[
+                  { label: 'Total de Notas', value: todayVehicles.reduce((s, x) => s + x.vInvoices.length, 0), color: 'text-slate-700 dark:text-white' },
+                  { label: 'Entregues', value: todayVehicles.reduce((s, x) => s + x.delivered, 0), color: 'text-green-600' },
+                  { label: 'Pendentes', value: todayVehicles.reduce((s, x) => s + x.pending, 0), color: 'text-orange-500' },
+                  { label: 'Valor Total', value: `R$ ${todayVehicles.reduce((s, x) => s + x.totalValue, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, color: 'text-blue-600' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 text-center border border-slate-200 dark:border-slate-700">
+                    <p className="text-xs text-slate-500 mb-1">{label}</p>
+                    <p className={`text-2xl font-bold ${color}`}>{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cards por veículo */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                {todayVehicles.map(({ v, vInvoices, driver, delivered, pending, returned, totalValue, isOnline }) => (
+                  <div key={v.id} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                    {/* Header do veículo */}
+                    <div className="flex items-center justify-between px-5 py-3 bg-slate-50 dark:bg-slate-900">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2 rounded-full ${isOnline ? 'bg-blue-600' : 'bg-slate-400'}`}>
+                          <Truck size={16} className="text-white" />
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-800 dark:text-white">{v.plate}</span>
+                          <span className="text-slate-400 text-sm ml-2">{v.model}</span>
+                          {driver && <span className="ml-2 text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full">{driver.name}</span>}
+                        </div>
+                        <div className="flex items-center gap-1 ml-2">
+                          <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`} />
+                          <span className="text-xs text-slate-500">{isOnline ? 'Online' : 'Offline'}</span>
+                          {v.last_location?.speed_kmh !== undefined && isOnline && (
+                            <span className="text-xs text-slate-400 ml-1">{v.last_location.speed_kmh} km/h</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="flex items-center gap-1 text-green-600 font-semibold"><CheckCircle size={14} /> {delivered}</span>
+                        <span className="flex items-center gap-1 text-orange-500 font-semibold"><Clock size={14} /> {pending}</span>
+                        {returned > 0 && <span className="flex items-center gap-1 text-red-500 font-semibold"><XCircle size={14} /> {returned}</span>}
+                        <span className="text-blue-600 font-bold">R$ {totalValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    </div>
+
+                    {/* Lista de notas */}
+                    {vInvoices.length === 0 ? (
+                      <div className="px-5 py-4 text-sm text-slate-400 text-center">Nenhuma nota hoje</div>
+                    ) : (
+                      <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {vInvoices.map(inv => {
+                          const statusConfig: Record<string, { label: string; color: string }> = {
+                            PENDING:     { label: 'Pendente',   color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+                            IN_PROGRESS: { label: 'Em Rota',   color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+                            DELIVERED:   { label: 'Entregue',  color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+                            RETURNED:    { label: 'Devolvida', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+                            FAILED:      { label: 'Falhou',    color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+                            ISSUE:       { label: 'Problema',  color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' },
+                          };
+                          const s = statusConfig[inv.status] ?? { label: inv.status, color: 'bg-slate-100 text-slate-600' };
+                          return (
+                            <div key={inv.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <span className="text-xs font-mono text-slate-400 shrink-0">NF {inv.number}</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{inv.customer_name}</span>
+                                <span className="text-xs text-slate-400 truncate hidden md:block">{inv.customer_address}</span>
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">R$ {(inv.value ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.color}`}>{s.label}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
      {/* Fleet Monitor Modal (VERSÃO FINAL 2.0: COM ROTAS VISUAIS) */}
       {showFleetMonitor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
@@ -2582,44 +2742,66 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  </div>
                  
                  <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                    {drivers.map(d => {
-                        const hasLocation = !!d.last_location;
-                        const lastUpdate = hasLocation ? new Date(d.last_location!.updated_at) : null;
-                        const isOnline = lastUpdate && (new Date().getTime() - lastUpdate.getTime() < 5 * 60 * 1000); 
-                        const isSelected = selectedDriverId === d.id;
+                    {vehicles.map(v => {
+                        const hasLocation = !!v.last_location;
+                        const lastUpdate = hasLocation ? new Date(v.last_location!.updated_at) : null;
+                        const isOnline = lastUpdate && (new Date().getTime() - lastUpdate.getTime() < 5 * 60 * 1000);
+                        const isSelected = selectedVehicleId === v.id;
+
+                        // Motorista atualmente vinculado ao veículo (invoice ativa)
+                        const activeInvoice = invoices.find(i =>
+                          i.vehicle_id === v.id &&
+                          (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
+                        );
+                        const activeDriver = activeInvoice ? drivers.find(d => d.id === activeInvoice.driver_id) : null;
+
+                        const pendingCount = invoices.filter(i =>
+                          i.vehicle_id === v.id &&
+                          i.status !== 'DELIVERED' &&
+                          i.status !== 'RETURNED' &&
+                          i.status !== 'FAILED'
+                        ).length;
 
                         return (
-                           <div 
-                             key={d.id}
-                             onClick={() => hasLocation && handleSelectDriver(d.id, d.last_location!.lat, d.last_location!.lng)}
+                           <div
+                             key={v.id}
+                             onClick={() => {
+                               if (!hasLocation) return;
+                               setSelectedVehicleId(v.id);
+                               if (activeDriver) setSelectedDriverId(activeDriver.id);
+                               else setSelectedDriverId(null);
+                               mapRef.current?.flyTo({ center: [v.last_location!.lng, v.last_location!.lat], zoom: 14, duration: 2000 });
+                             }}
                              className={`p-3 rounded-lg border transition-all cursor-pointer flex items-center justify-between group
                                 ${isSelected ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-500 ring-1 ring-blue-500' : ''}
-                                ${hasLocation 
-                                   ? 'hover:bg-blue-50 dark:hover:bg-blue-900/20 border-slate-100 dark:border-slate-700 hover:border-blue-300' 
+                                ${hasLocation
+                                   ? 'hover:bg-blue-50 dark:hover:bg-blue-900/20 border-slate-100 dark:border-slate-700 hover:border-blue-300'
                                    : 'opacity-50 cursor-not-allowed border-transparent'}
                              `}
                            >
                               <div className="flex items-center gap-3">
                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${isOnline ? 'bg-blue-600' : 'bg-slate-400'}`}>
-                                    {d.name.substring(0,2).toUpperCase()}
+                                    <Truck size={18} />
                                  </div>
                                  <div>
-                                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm block">{d.name}</span>
+                                    <span className="font-bold text-slate-700 dark:text-slate-200 text-sm block">{v.plate}</span>
                                     <span className="text-[10px] text-slate-500 flex items-center gap-1">
                                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></div>
                                        {isOnline ? 'Sinal Ativo' : 'Offline'}
+                                       {v.last_location?.source === 'salvadorsat' && (
+                                         <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 px-1 rounded font-semibold">SAT</span>
+                                       )}
+                                       {v.last_location?.source === 'app' && (
+                                         <span className="bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400 px-1 rounded font-semibold">APP</span>
+                                       )}
                                     </span>
+                                    {activeDriver && (
+                                      <span className="text-[10px] text-slate-400 dark:text-slate-500 block">{activeDriver.name}</span>
+                                    )}
                                  </div>
                               </div>
-                              {/* Mostra quantas entregas pendentes ele tem */}
-                              {/* Mostra quantas entregas pendentes (ATIVAS) ele tem */}
                               <span className="text-xs font-bold bg-slate-200 dark:bg-slate-700 px-2 py-1 rounded text-slate-600 dark:text-slate-300">
-                                 {invoices.filter(i => 
-                                     i.driver_id === d.id && 
-                                     i.status !== 'DELIVERED' && 
-                                     i.status !== 'RETURNED' &&  // <--- ADICIONE ISSO
-                                     i.status !== 'FAILED'       // <--- GARANTA ISSO
-                                 ).length}
+                                 {pendingCount}
                               </span>
                            </div>
                         )
@@ -2646,25 +2828,33 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     <NavigationControl position="bottom-right" />
                     <FullscreenControl position="bottom-right" />
 
-                    {/* 1. RENDERIZA OS MOTORISTAS (CAMINHÕES) */}
-                    {drivers.map(d => {
-                        if (!d.last_location) return null;
-                        const isSelected = selectedDriverId === d.id;
-                        
+                    {/* 1. RENDERIZA OS VEÍCULOS (CAMINHÕES) */}
+                    {vehicles.map(v => {
+                        if (!v.last_location) return null;
+                        const isSelected = selectedVehicleId === v.id;
+                        const activeInvoice = invoices.find(i =>
+                          i.vehicle_id === v.id &&
+                          (i.status === 'PENDING' || i.status === 'IN_PROGRESS')
+                        );
+                        const activeDriver = activeInvoice ? drivers.find(d => d.id === activeInvoice.driver_id) : null;
+
                         return (
-                            <Marker 
-                                key={d.id} 
-                                latitude={d.last_location.lat} 
-                                longitude={d.last_location.lng}
+                            <Marker
+                                key={v.id}
+                                latitude={v.last_location.lat}
+                                longitude={v.last_location.lng}
                                 anchor="bottom"
                                 onClick={(e) => {
                                     e.originalEvent.stopPropagation();
-                                    handleSelectDriver(d.id, d.last_location!.lat, d.last_location!.lng);
+                                    setSelectedVehicleId(v.id);
+                                    if (activeDriver) setSelectedDriverId(activeDriver.id);
+                                    else setSelectedDriverId(null);
+                                    mapRef.current?.flyTo({ center: [v.last_location!.lng, v.last_location!.lat], zoom: 14, duration: 2000 });
                                 }}
                             >
                                 <div className={`relative group cursor-pointer flex flex-col items-center transition-all duration-500 ${isSelected ? 'scale-125 z-50' : 'scale-100 z-10'}`}>
                                     <div className="mb-1 px-2 py-0.5 bg-white/90 dark:bg-black/80 backdrop-blur text-slate-800 dark:text-white text-[10px] font-bold rounded shadow-sm border border-slate-200 dark:border-slate-600 whitespace-nowrap">
-                                       {d.name}
+                                       {v.plate}{activeDriver ? ` · ${activeDriver.name.split(' ')[0]}` : ''}
                                     </div>
                                     <div className={`p-2 rounded-full shadow-xl border-2 ${isSelected ? 'bg-blue-600 border-white ring-4 ring-blue-500/30' : 'bg-slate-500 border-slate-300'}`}>
                                         <Truck size={20} className="text-white" />
@@ -2680,12 +2870,11 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         const groupedInvoices: Record<string, Invoice[]> = {};
                         
                         invoices
-                            .filter(inv => 
-                                inv.driver_id === selectedDriverId && 
-                                inv.lat && inv.lng && 
-                                // FILTRO DE STATUS AJUSTADO:
-                                inv.status !== 'DELIVERED' && 
-                                inv.status !== 'RETURNED' && // <--- O PULO DO GATO
+                            .filter(inv =>
+                                inv.vehicle_id === selectedVehicleId &&
+                                inv.lat && inv.lng &&
+                                inv.status !== 'DELIVERED' &&
+                                inv.status !== 'RETURNED' &&
                                 inv.status !== 'FAILED'
                             )
                             .forEach(inv => {

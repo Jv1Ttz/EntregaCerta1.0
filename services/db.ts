@@ -148,8 +148,14 @@ export const db = {
 
   updateDriverLocation: async (driverId: string, lat: number, lng: number) => {
     await supabase.from('drivers').update({
-      last_location: { lat, lng, updated_at: new Date().toISOString() }
+      last_location: { lat, lng, updated_at: new Date().toISOString(), source: 'app' }
     }).eq('id', driverId);
+  },
+
+  updateVehicleLocation: async (vehicleId: string, lat: number, lng: number) => {
+    await supabase.from('vehicles').update({
+      last_location: { lat, lng, updated_at: new Date().toISOString(), source: 'app' }
+    }).eq('id', vehicleId);
   },
 
   getVehicles: async (): Promise<Vehicle[]> => {

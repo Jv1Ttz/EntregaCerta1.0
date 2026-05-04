@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../services/db';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
-import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff } from 'lucide-react';
 
 interface SellerViewProps {
   onBack: () => void;
@@ -49,11 +49,18 @@ const formatCurrency = (value?: number) => {
 };
 
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // ── dados ──────────────────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ── filtros ────────────────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDriver, setFilterDriver] = useState('');
   const [filterVehicle, setFilterVehicle] = useState('');
@@ -65,46 +72,26 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [sortConfig, setSortConfig] = useState<Array<{ key: string; direction: 'asc' | 'desc' }>>([
     { key: 'created_at', direction: 'desc' },
   ]);
+
+  // ── paginação ──────────────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  // ── comprovante ────────────────────────────────────────────────────────────
   const [viewingProof, setViewingProof] = useState<{ invoice: Invoice; proof: DeliveryProof } | null>(null);
   const [loadingProofId, setLoadingProofId] = useState<string | null>(null);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [zoomedScale, setZoomedScale] = useState(1);
 
   useEffect(() => {
+    if (!authenticated) return;
     Promise.all([db.getInvoices(), db.getDrivers(), db.getVehicles()]).then(
-      ([inv, drv, veh]) => {
-        setInvoices(inv);
-        setDrivers(drv);
-        setVehicles(veh);
-        setLoading(false);
-      }
+      ([inv, drv, veh]) => { setInvoices(inv); setDrivers(drv); setVehicles(veh); setLoading(false); }
     );
-  }, []);
+  }, [authenticated]);
 
-  const driverMap = useMemo(
-    () => Object.fromEntries(drivers.map(d => [d.id, d.name])),
-    [drivers]
-  );
-
-  const vehicleMap = useMemo(
-    () => Object.fromEntries(vehicles.map(v => [v.id, `${v.plate} — ${v.model}`])),
-    [vehicles]
-  );
-
-  const hasActiveFilter = !!(searchTerm || filterDriver || filterVehicle || filterStatus || filterStartDate || filterEndDate || filterDeliveryStartDate || filterDeliveryEndDate);
-
-  const clearFilters = () => {
-    setSearchTerm('');
-    setFilterDriver('');
-    setFilterVehicle('');
-    setFilterStatus('');
-    setFilterStartDate('');
-    setFilterEndDate('');
-    setFilterDeliveryStartDate('');
-    setFilterDeliveryEndDate('');
-  };
+  const driverMap = useMemo(() => Object.fromEntries(drivers.map(d => [d.id, d.name])), [drivers]);
+  const vehicleMap = useMemo(() => Object.fromEntries(vehicles.map(v => [v.id, `${v.plate} — ${v.model}`])), [vehicles]);
 
   const filtered = useMemo(() => {
     return invoices.filter(inv => {
@@ -115,7 +102,6 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
         inv.value.toString().includes(searchLower) ||
         inv.access_key.includes(searchLower)
       );
-
       const matchesDriver = !filterDriver || inv.driver_id === filterDriver;
       const matchesVehicle = !filterVehicle || inv.vehicle_id === filterVehicle;
       const matchesStatus = !filterStatus || (
@@ -125,18 +111,14 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             ? (inv.status === 'FAILED' && inv.return_final_status === 'CANCELLED')
             : inv.status === filterStatus
       );
-
       const invoiceDate = inv.created_at.split('T')[0];
       const matchesStart = !filterStartDate || invoiceDate >= filterStartDate;
       const matchesEnd = !filterEndDate || invoiceDate <= filterEndDate;
-
       const deliveryDate = inv.delivered_at ? inv.delivered_at.split('T')[0] : null;
       const matchesDeliveryStart = !filterDeliveryStartDate || (deliveryDate && deliveryDate >= filterDeliveryStartDate);
       const matchesDeliveryEnd = !filterDeliveryEndDate || (deliveryDate && deliveryDate <= filterDeliveryEndDate);
-
       return matchesSearch && matchesDriver && matchesVehicle && matchesStatus &&
-        matchesStart && matchesEnd &&
-        matchesDeliveryStart && matchesDeliveryEnd;
+        matchesStart && matchesEnd && matchesDeliveryStart && matchesDeliveryEnd;
     });
   }, [invoices, searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate]);
 
@@ -146,14 +128,8 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
       for (const { key, direction } of sortConfig) {
         let aValue = a[key];
         let bValue = b[key];
-        if (key === 'driver_id') {
-          aValue = drivers.find(d => d.id === a.driver_id)?.name || '';
-          bValue = drivers.find(d => d.id === b.driver_id)?.name || '';
-        }
-        if (key === 'vehicle_id') {
-          aValue = vehicles.find(v => v.id === a.vehicle_id)?.plate || '';
-          bValue = vehicles.find(v => v.id === b.vehicle_id)?.plate || '';
-        }
+        if (key === 'driver_id') { aValue = drivers.find(d => d.id === a.driver_id)?.name || ''; bValue = drivers.find(d => d.id === b.driver_id)?.name || ''; }
+        if (key === 'vehicle_id') { aValue = vehicles.find(v => v.id === a.vehicle_id)?.plate || ''; bValue = vehicles.find(v => v.id === b.vehicle_id)?.plate || ''; }
         if (!aValue && !bValue) continue;
         if (!aValue) return 1;
         if (!bValue) return -1;
@@ -165,6 +141,95 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     return items;
   }, [filtered, sortConfig, drivers, vehicles]);
 
+  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate, sortConfig]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sorted.slice(start, start + pageSize);
+  }, [sorted, currentPage, pageSize]);
+
+  // ── handlers ───────────────────────────────────────────────────────────────
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const configured = import.meta.env.VITE_SELLER_PASSWORD as string | undefined;
+    if (configured && passwordInput === configured) {
+      setAuthenticated(true);
+      setPasswordError(false);
+    } else {
+      setPasswordError(true);
+      setPasswordInput('');
+    }
+  };
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl w-full max-w-sm overflow-hidden">
+          <div className="bg-emerald-600 p-6 text-white">
+            <div className="h-12 w-12 bg-white/20 rounded-xl flex items-center justify-center mb-3">
+              <Package size={26} />
+            </div>
+            <h1 className="text-xl font-bold">Consulta de Pedidos</h1>
+            <p className="text-emerald-100 text-sm mt-1">Visão do Vendedor</p>
+          </div>
+          <form onSubmit={handleLogin} className="p-6 space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1.5">
+                Senha de acesso
+              </label>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={passwordInput}
+                  onChange={e => { setPasswordInput(e.target.value); setPasswordError(false); }}
+                  placeholder="Digite a senha"
+                  autoFocus
+                  className={`w-full px-3 py-2.5 pr-10 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
+                    ${passwordError
+                      ? 'border-red-400 focus:ring-2 focus:ring-red-300'
+                      : 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-emerald-500'}`}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(s => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {passwordError && (
+                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
+                  <AlertTriangle size={12} /> Senha incorreta.
+                </p>
+              )}
+            </div>
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm transition-colors"
+            >
+              Entrar
+            </button>
+            <button
+              type="button"
+              onClick={onBack}
+              className="w-full py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-sm transition-colors"
+            >
+              Voltar
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  const hasActiveFilter = !!(searchTerm || filterDriver || filterVehicle || filterStatus || filterStartDate || filterEndDate || filterDeliveryStartDate || filterDeliveryEndDate);
+
+  const clearFilters = () => {
+    setSearchTerm(''); setFilterDriver(''); setFilterVehicle(''); setFilterStatus('');
+    setFilterStartDate(''); setFilterEndDate(''); setFilterDeliveryStartDate(''); setFilterDeliveryEndDate('');
+  };
+
   const requestSort = (key: string) => {
     setSortConfig(prev => {
       const existing = prev.find(s => s.key === key);
@@ -174,15 +239,6 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
       return remaining.length > 0 ? remaining : [{ key: 'created_at', direction: 'desc' as const }];
     });
   };
-
-  // Reset page when filters or sort change
-  useEffect(() => { setCurrentPage(1); }, [searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate, sortConfig]);
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
-  const paginated = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return sorted.slice(start, start + pageSize);
-  }, [sorted, currentPage, pageSize]);
 
   const handleViewProof = async (invoice: Invoice) => {
     setLoadingProofId(invoice.id);

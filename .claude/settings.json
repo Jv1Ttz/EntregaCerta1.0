@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "mcp__mcp-obsidian__obsidian_simple_search",
-      "mcp__mcp-obsidian__obsidian_list_vault_directory"
+      "mcp__mcp-obsidian__obsidian_list_vault_directory",
+      "Bash(winget --version)",
+      "Bash(winget search *)",
+      "Bash(scoop --version)",
+      "Bash(curl -s https://api.github.com/repos/supabase/cli/releases/latest)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.supabase\"; supabase --version)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.supabase\"; supabase init 2>&1)",
+      "PowerShell($env:PATH += \";$env:USERPROFILE\\\\.supabase\"; supabase login 2>&1)"
     ]
   }
 }
