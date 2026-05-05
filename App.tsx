@@ -6,6 +6,7 @@ import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
 import { AdminAuditView } from './components/AdminAuditView';
 import { SellerView } from './components/SellerView';
+import { RoteirizacaoView } from './components/RoteirizacaoView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -274,16 +275,23 @@ const App: React.FC = () => {
        case 'ADMIN_DASHBOARD':
         return (
            <div className="relative">
-              {/* ADICIONADO: Passando as props toggleTheme e theme */}
-              <AdminView toggleTheme={toggleTheme} theme={theme} />
-              
-              <button 
+              <AdminView
+                toggleTheme={toggleTheme}
+                theme={theme}
+                onNavigate={(v) => setView({ type: v as any })}
+              />
+              <button
                 onClick={() => setView({ type: 'ROLE_SELECT' })}
                 className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
               >
                 Sair do Admin
               </button>
            </div>
+        );
+
+      case 'ADMIN_ROUTING':
+        return (
+          <RoteirizacaoView onBack={() => setView({ type: 'ADMIN_DASHBOARD' })} />
         );
 
       case 'DRIVER_LIST':

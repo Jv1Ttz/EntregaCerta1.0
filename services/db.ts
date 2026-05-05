@@ -235,7 +235,16 @@ export const db = {
     if (error) alert("Erro ao salvar nota: " + error.message);
   },
 
-  // Adicione isso no services/db.ts
+  // Atribuição em lote de vehicle_id (usada pela Roteirização)
+  assignVehicleToInvoices: async (vehicleId: string, invoiceIds: string[]) => {
+    if (invoiceIds.length === 0) return;
+    const { error } = await supabase
+      .from('invoices')
+      .update({ vehicle_id: vehicleId })
+      .in('id', invoiceIds);
+    if (error) throw error;
+  },
+
   updateInvoiceLocation: async (invoiceId: string, lat: number, lng: number) => {
     const { error } = await supabase
       .from('invoices')

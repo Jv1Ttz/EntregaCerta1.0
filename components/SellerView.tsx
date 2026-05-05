@@ -39,6 +39,25 @@ const STATUS_ICON: Record<DeliveryStatus, React.ReactNode> = {
   [DeliveryStatus.RETURNED]: <RotateCw size={12} />,
 };
 
+/** Abre rastreamento SSW em nova aba com CNPJ e NF pré-preenchidos */
+const trackOnSSW = (invoiceNumber: string) => {
+  const form = document.createElement('form');
+  form.action = 'https://ssw.inf.br/2/ssw_resultSSW';
+  form.method = 'POST';
+  form.target = '_blank';
+  form.style.display = 'none';
+  const add = (name: string, value: string) => {
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = name; input.value = value;
+    form.appendChild(input);
+  };
+  add('cnpj', '03326448000198');
+  add('NR', invoiceNumber);
+  document.body.appendChild(form);
+  form.submit();
+  document.body.removeChild(form);
+};
+
 const formatDate = (iso?: string | null) => {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('pt-BR', {
@@ -767,6 +786,16 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {/* Rastrear no SSW — somente TRANSPORTADORA */}
+                          {driverMap[inv.driver_id ?? '']?.toUpperCase() === 'TRANSPORTADORA' && (
+                            <button
+                              onClick={() => trackOnSSW(inv.number)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 transition-colors"
+                              title="Rastrear no SSW"
+                            >
+                              <ExternalLink size={12} /> SSW
+                            </button>
+                          )}
                           {inv.pdf_url && (
                             <a
                               href={inv.pdf_url}
@@ -809,6 +838,15 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                         {STATUS_ICON[inv.status]}
                         {STATUS_LABEL[inv.status] ?? inv.status}
                       </span>
+                      {/* Rastrear no SSW — somente TRANSPORTADORA */}
+                      {driverMap[inv.driver_id ?? '']?.toUpperCase() === 'TRANSPORTADORA' && (
+                        <button
+                          onClick={() => trackOnSSW(inv.number)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30"
+                        >
+                          <ExternalLink size={12} /> SSW
+                        </button>
+                      )}
                       {inv.pdf_url && (
                         <a
                           href={inv.pdf_url}

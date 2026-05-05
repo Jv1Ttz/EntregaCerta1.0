@@ -2,12 +2,12 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 import { LabelsView } from './LabelsView';
 
-import Map, { Marker, NavigationControl, FullscreenControl } from 'react-map-gl';
+import Map, { Marker, NavigationControl, FullscreenControl, Source, Layer } from 'react-map-gl';
 import type { MapRef } from 'react-map-gl';
 
 import mapboxgl from 'mapbox-gl';
@@ -18,12 +18,80 @@ const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
 mapboxgl.accessToken = MAPBOX_TOKEN;
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
+// ── Roteirização ────────────────────────────────────────────────────────────
+const ROT_ORIGIN = { lat: -12.931685, lng: -38.512682 };
+const ROUTE_COLORS = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+
+function geoDistance(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const dlat = a.lat - b.lat;
+  const dlng = a.lng - b.lng;
+  return Math.sqrt(dlat * dlat + dlng * dlng);
+}
+
+function kMeansClusters(invoices: Invoice[], k: number): Invoice[][] {
+  if (k <= 0 || invoices.length === 0) return [];
+  if (k >= invoices.length) return invoices.map(inv => [inv]);
+
+  // Inicializa centroids espalhados
+  const step = Math.floor(invoices.length / k);
+  let centroids = Array.from({ length: k }, (_, i) => ({
+    lat: invoices[i * step].lat!,
+    lng: invoices[i * step].lng!,
+  }));
+
+  let clusters: Invoice[][] = [];
+  let changed = true;
+  let iter = 0;
+
+  while (changed && iter < 100) {
+    iter++;
+    clusters = Array.from({ length: k }, () => [] as Invoice[]);
+    for (const inv of invoices) {
+      let minDist = Infinity;
+      let nearest = 0;
+      centroids.forEach((c, i) => {
+        const d = geoDistance({ lat: inv.lat!, lng: inv.lng! }, c);
+        if (d < minDist) { minDist = d; nearest = i; }
+      });
+      clusters[nearest].push(inv);
+    }
+    const newCentroids = clusters.map(cl =>
+      cl.length === 0 ? { lat: 0, lng: 0 } : {
+        lat: cl.reduce((s, p) => s + p.lat!, 0) / cl.length,
+        lng: cl.reduce((s, p) => s + p.lng!, 0) / cl.length,
+      }
+    );
+    changed = newCentroids.some((c, i) => geoDistance(c, centroids[i]) > 0.00001);
+    centroids = newCentroids;
+  }
+  return clusters;
+}
+
+function nearestNeighborOrder(invoices: Invoice[], origin: { lat: number; lng: number }): Invoice[] {
+  const result: Invoice[] = [];
+  const remaining = [...invoices];
+  let current = origin;
+  while (remaining.length > 0) {
+    let minDist = Infinity;
+    let nearestIdx = 0;
+    remaining.forEach((inv, i) => {
+      const d = geoDistance(current, { lat: inv.lat!, lng: inv.lng! });
+      if (d < minDist) { minDist = d; nearestIdx = i; }
+    });
+    const [nearest] = remaining.splice(nearestIdx, 1);
+    result.push(nearest);
+    current = { lat: nearest.lat!, lng: nearest.lng! };
+  }
+  return result;
+}
+
 interface AdminViewProps {
   toggleTheme?: () => void;
   theme?: string;
+  onNavigate?: (view: string) => void;
 }
 
-export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme }) => {
+export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavigate }) => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -1026,6 +1094,25 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     }]);
   };
 
+  /** Abre rastreamento SSW em nova aba com CNPJ e NF pré-preenchidos */
+  const trackOnSSW = (invoiceNumber: string) => {
+    const form = document.createElement('form');
+    form.action = 'https://ssw.inf.br/2/ssw_resultSSW';
+    form.method = 'POST';
+    form.target = '_blank';
+    form.style.display = 'none';
+    const add = (name: string, value: string) => {
+      const input = document.createElement('input');
+      input.type = 'hidden'; input.name = name; input.value = value;
+      form.appendChild(input);
+    };
+    add('cnpj', '03326448000198');
+    add('NR', invoiceNumber);
+    document.body.appendChild(form);
+    form.submit();
+    document.body.removeChild(form);
+  };
+
   const handleDeleteInvoice = (id: string) => {
     setConfirmModal({
       isOpen: true,
@@ -1548,6 +1635,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
             
             <button onClick={() => setShowControladoria(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
               <LayoutDashboard className="h-4 w-4" /> <span className="font-medium text-sm">Controladoria</span>
+            </button>
+
+            <button onClick={() => onNavigate?.('ADMIN_ROUTING')} className="flex items-center justify-center gap-2 px-3 py-2 bg-violet-50 dark:bg-violet-900/30 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 rounded-md transition-colors shadow-sm">
+              <Route className="h-4 w-4" /> <span className="font-medium text-sm">Roteirização</span>
             </button>
 
             <button onClick={() => setShowAddVehicle(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
@@ -2231,6 +2322,17 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                   >
                                     <FileText size={16} />
                                     <span>Visualizar PDF da Nota</span>
+                                  </button>
+                                )}
+
+                                {/* Rastrear no SSW — somente para TRANSPORTADORA */}
+                                {drivers.find(d => d.id === inv.driver_id)?.name?.toUpperCase() === 'TRANSPORTADORA' && (
+                                  <button
+                                    onClick={() => { trackOnSSW(inv.number); setOpenActionsRow(null); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-50 dark:hover:bg-sky-900/40 text-sky-600 dark:text-sky-300"
+                                  >
+                                    <ExternalLink size={16} />
+                                    <span>Rastrear no SSW</span>
                                   </button>
                                 )}
 
