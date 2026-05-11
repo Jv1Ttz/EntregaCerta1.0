@@ -1641,6 +1641,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               <Route className="h-4 w-4" /> <span className="font-medium text-sm">Roteirização</span>
             </button>
 
+            <button onClick={() => onNavigate?.('ADMIN_ZONES')} className="flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-md transition-colors shadow-sm">
+              <MapPin className="h-4 w-4" /> <span className="font-medium text-sm">Zonas</span>
+            </button>
+
             <button onClick={() => setShowAddVehicle(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
               <Truck className="h-4 w-4" /> <span className="font-medium text-sm">Gerir Veículos</span>
             </button>

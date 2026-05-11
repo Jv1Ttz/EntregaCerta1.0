@@ -550,5 +550,42 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
 
   updateAdminPassword: async (newPassword: string) => {
     alert("Configuração de senha deve ser feita via Variáveis de Ambiente no Supabase/Vercel.");
-  }
+  },
+
+  // ── Zonas geográficas ──────────────────────────────────────────────────────
+
+  getZones: async () => {
+    const { data, error } = await supabase
+      .from('zones')
+      .select('*')
+      .order('created_at');
+    if (error) throw error;
+    return (data ?? []) as import('../types').Zone[];
+  },
+
+  createZone: async (zone: Omit<import('../types').Zone, 'id' | 'created_at'>) => {
+    const { data, error } = await supabase
+      .from('zones')
+      .insert(zone)
+      .select()
+      .single();
+    if (error) throw error;
+    return data as import('../types').Zone;
+  },
+
+  updateZone: async (id: string, updates: Partial<Pick<import('../types').Zone, 'name' | 'color' | 'coordinates'>>) => {
+    const { error } = await supabase
+      .from('zones')
+      .update(updates)
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  deleteZone: async (id: string) => {
+    const { error } = await supabase
+      .from('zones')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
 };

@@ -1,0 +1,353 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { db } from '../services/db';
+import { Zone } from '../types';
+import {
+  ChevronLeft, Plus, Trash2, Pencil, Check, X, Loader2,
+  MousePointer2, Hexagon,
+} from 'lucide-react';
+import Map, { Marker, NavigationControl, Source, Layer } from 'react-map-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+
+const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
+const CENTER = { lat: -12.931685, lng: -38.512682 };
+
+const ZONE_COLORS = [
+  '#3b82f6', '#ef4444', '#22c55e', '#f59e0b',
+  '#8b5cf6', '#ec4899', '#06b6d4', '#f97316',
+  '#84cc16', '#14b8a6',
+];
+
+/** Centróide aproximado de um polígono (média dos vértices) */
+function centroid(coords: { lat: number; lng: number }[]) {
+  return {
+    lat: coords.reduce((s, p) => s + p.lat, 0) / coords.length,
+    lng: coords.reduce((s, p) => s + p.lng, 0) / coords.length,
+  };
+}
+
+interface Props { onBack: () => void; }
+
+export const ZonasView: React.FC<Props> = ({ onBack }) => {
+  const [zones, setZones] = useState<Zone[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // ── Draw mode ────────────────────────────────────────────────────────────
+  const [drawing, setDrawing] = useState(false);
+  const [draftPoints, setDraftPoints] = useState<{ lat: number; lng: number }[]>([]);
+  const [draftColor, setDraftColor] = useState(ZONE_COLORS[0]);
+
+  // ── Naming dialog ────────────────────────────────────────────────────────
+  const [namingZone, setNamingZone] = useState(false);
+  const [draftName, setDraftName] = useState('');
+
+  // ── Inline rename ────────────────────────────────────────────────────────
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
+
+  useEffect(() => {
+    db.getZones().then(z => { setZones(z); setLoading(false); });
+  }, []);
+
+  // ── Draw helpers ─────────────────────────────────────────────────────────
+
+  const startDraw = () => {
+    const usedColors = zones.map(z => z.color);
+    const next = ZONE_COLORS.find(c => !usedColors.includes(c)) ?? ZONE_COLORS[zones.length % ZONE_COLORS.length];
+    setDraftColor(next);
+    setDraftPoints([]);
+    setDrawing(true);
+  };
+
+  const cancelDraw = () => {
+    setDrawing(false);
+    setDraftPoints([]);
+    setNamingZone(false);
+    setDraftName('');
+  };
+
+  const handleMapClick = useCallback((e: { lngLat: { lat: number; lng: number } }) => {
+    if (!drawing || namingZone) return;
+    const { lng, lat } = e.lngLat;
+    setDraftPoints(prev => [...prev, { lat, lng }]);
+  }, [drawing, namingZone]);
+
+  const closeDraft = () => {
+    if (draftPoints.length < 3) return;
+    setNamingZone(true);
+    setDraftName('');
+  };
+
+  const saveZone = async () => {
+    if (!draftName.trim() || draftPoints.length < 3) return;
+    setSaving(true);
+    try {
+      const newZone = await db.createZone({ name: draftName.trim(), color: draftColor, coordinates: draftPoints });
+      setZones(prev => [...prev, newZone]);
+      cancelDraw();
+    } finally { setSaving(false); }
+  };
+
+  // ── CRUD helpers ─────────────────────────────────────────────────────────
+
+  const deleteZone = async (id: string) => {
+    await db.deleteZone(id);
+    setZones(prev => prev.filter(z => z.id !== id));
+  };
+
+  const startEdit = (zone: Zone) => { setEditingId(zone.id); setEditingName(zone.name); };
+
+  const saveEdit = async () => {
+    if (!editingId || !editingName.trim()) return;
+    await db.updateZone(editingId, { name: editingName.trim() });
+    setZones(prev => prev.map(z => z.id === editingId ? { ...z, name: editingName.trim() } : z));
+    setEditingId(null);
+  };
+
+  // ── GeoJSON helpers ───────────────────────────────────────────────────────
+
+  const toGeoJson = (coords: { lat: number; lng: number }[], close = true) => {
+    const pts = coords.map(p => [p.lng, p.lat]);
+    if (close && pts.length >= 3) pts.push(pts[0]);
+    return {
+      type: 'Feature' as const,
+      geometry: { type: 'Polygon' as const, coordinates: [pts] },
+      properties: {},
+    };
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="h-screen overflow-hidden bg-slate-50 dark:bg-slate-900 flex flex-col">
+
+      {/* Header */}
+      <div className="bg-indigo-600 text-white px-5 py-3 flex items-center gap-4 shadow-lg shrink-0">
+        <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/20 transition-colors">
+          <ChevronLeft size={20} />
+        </button>
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
+            <Hexagon size={20} />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg leading-tight">Zonas de Entrega</h1>
+            <p className="text-indigo-200 text-xs">Defina regiões geográficas para agrupar entregas</p>
+          </div>
+        </div>
+        <div className="ml-auto text-indigo-200 text-sm">
+          {zones.length} zona{zones.length !== 1 ? 's' : ''} cadastrada{zones.length !== 1 ? 's' : ''}
+        </div>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+
+        {/* ── Painel esquerdo ─────────────────────────────────────────────── */}
+        <div className="w-72 shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-white dark:bg-slate-800">
+
+          {/* Controles de desenho */}
+          <div className="p-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+            {!drawing ? (
+              <button onClick={startDraw}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5
+                  bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors">
+                <Plus size={16} /> Nova Zona
+              </button>
+            ) : (
+              <div className="space-y-3">
+                {/* Seletor de cor */}
+                <div>
+                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Cor da zona</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ZONE_COLORS.map(c => (
+                      <button key={c} onClick={() => setDraftColor(c)}
+                        className="w-6 h-6 rounded-full border-2 transition-all"
+                        style={{
+                          backgroundColor: c,
+                          borderColor: draftColor === c ? '#1e293b' : 'transparent',
+                          transform: draftColor === c ? 'scale(1.2)' : 'scale(1)',
+                        }} />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Contagem de pontos */}
+                <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
+                  {draftPoints.length === 0
+                    ? 'Clique no mapa para começar'
+                    : `${draftPoints.length} ponto${draftPoints.length !== 1 ? 's' : ''} marcado${draftPoints.length !== 1 ? 's' : ''}`}
+                </p>
+
+                <div className="flex gap-2">
+                  <button onClick={closeDraft} disabled={draftPoints.length < 3}
+                    className="flex-1 flex items-center justify-center gap-1 py-2 px-3
+                      bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed
+                      text-white font-bold rounded-lg text-sm transition-colors">
+                    <Check size={14} /> Fechar Polígono
+                  </button>
+                  <button onClick={cancelDraw}
+                    className="flex items-center justify-center px-3 py-2 rounded-lg text-sm
+                      bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                      text-slate-600 dark:text-slate-300 transition-colors">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Lista de zonas */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 size={24} className="animate-spin text-indigo-400" />
+              </div>
+            ) : zones.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400 text-center py-12">
+                <Hexagon size={40} className="opacity-30" />
+                <p className="text-sm">Nenhuma zona criada ainda.<br />Clique em "Nova Zona" e<br />desenhe no mapa.</p>
+              </div>
+            ) : zones.map(zone => (
+              <div key={zone.id}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg border
+                  bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600">
+                <div className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
+                {editingId === zone.id ? (
+                  <input autoFocus value={editingName}
+                    onChange={e => setEditingName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingId(null); }}
+                    className="flex-1 text-sm bg-white dark:bg-slate-800 border border-indigo-300 rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-indigo-400" />
+                ) : (
+                  <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{zone.name}</span>
+                )}
+                {editingId === zone.id ? (
+                  <button onClick={saveEdit} className="text-green-500 hover:text-green-600 shrink-0 cursor-pointer">
+                    <Check size={14} />
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => startEdit(zone)}
+                      className="text-slate-400 hover:text-indigo-500 transition-colors shrink-0 cursor-pointer">
+                      <Pencil size={13} />
+                    </button>
+                    <button onClick={() => deleteZone(zone.id)}
+                      className="text-slate-400 hover:text-red-500 transition-colors shrink-0 cursor-pointer">
+                      <Trash2 size={13} />
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Dica de uso */}
+          {zones.length > 0 && !drawing && (
+            <div className="p-3 border-t border-slate-200 dark:border-slate-700 shrink-0">
+              <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
+                Zonas são reutilizadas automaticamente<br />na tela de Roteirização.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Mapa ────────────────────────────────────────────────────────── */}
+        <div className="flex-1 relative min-h-0"
+          style={{ cursor: drawing && !namingZone ? 'crosshair' : 'default' }}>
+
+          {/* Banner de instrução */}
+          {drawing && !namingZone && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none
+              bg-indigo-600 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg
+              flex items-center gap-2">
+              <MousePointer2 size={15} />
+              Clique para marcar os vértices · Mínimo 3 pontos
+            </div>
+          )}
+
+          {/* Dialog de nome */}
+          {namingZone && (
+            <div className="absolute inset-0 z-20 bg-black/30 flex items-center justify-center">
+              <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl p-6 w-80
+                border border-slate-200 dark:border-slate-700">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: draftColor }} />
+                  <h3 className="font-bold text-slate-800 dark:text-white">Nomear zona</h3>
+                </div>
+                <input autoFocus value={draftName}
+                  onChange={e => setDraftName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveZone(); if (e.key === 'Escape') setNamingZone(false); }}
+                  placeholder="Ex: Zona Norte, Litoral, Centro..."
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600
+                    bg-white dark:bg-slate-900 text-slate-900 dark:text-white
+                    rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400 mb-4" />
+                <div className="flex gap-2">
+                  <button onClick={() => setNamingZone(false)}
+                    className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors
+                      bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                      text-slate-600 dark:text-slate-300">
+                    Voltar
+                  </button>
+                  <button onClick={saveZone} disabled={!draftName.trim() || saving}
+                    className="flex-1 py-2 rounded-lg text-sm font-bold transition-colors
+                      bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50
+                      text-white flex items-center justify-center gap-2">
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    Salvar Zona
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <Map
+            initialViewState={{ latitude: CENTER.lat, longitude: CENTER.lng, zoom: 11 }}
+            style={{ width: '100%', height: '100%' }}
+            mapStyle="mapbox://styles/mapbox/streets-v12"
+            mapboxAccessToken={MAPBOX_TOKEN}
+            onClick={handleMapClick}
+          >
+            <NavigationControl position="bottom-right" />
+
+            {/* Zonas salvas */}
+            {zones.map(zone => {
+              if (zone.coordinates.length < 3) return null;
+              return (
+                <React.Fragment key={zone.id}>
+                  <Source type="geojson" data={toGeoJson(zone.coordinates)}>
+                    <Layer type="fill" paint={{ 'fill-color': zone.color, 'fill-opacity': 0.18 }} />
+                    <Layer type="line" paint={{ 'line-color': zone.color, 'line-width': 2.5 }} />
+                  </Source>
+                  {/* Label centrado */}
+                  {(() => { const c = centroid(zone.coordinates); return (
+                    <Marker latitude={c.lat} longitude={c.lng} anchor="center">
+                      <div className="px-2 py-0.5 rounded-full text-white text-[11px] font-bold shadow-md pointer-events-none select-none"
+                        style={{ backgroundColor: zone.color }}>
+                        {zone.name}
+                      </div>
+                    </Marker>
+                  ); })()}
+                </React.Fragment>
+              );
+            })}
+
+            {/* Polígono em rascunho */}
+            {draftPoints.length >= 2 && (
+              <Source type="geojson" data={toGeoJson(draftPoints, draftPoints.length >= 3)}>
+                <Layer type="fill" paint={{ 'fill-color': draftColor, 'fill-opacity': 0.15 }} />
+                <Layer type="line" paint={{ 'line-color': draftColor, 'line-width': 2, 'line-dasharray': [2, 1.5] }} />
+              </Source>
+            )}
+
+            {/* Pontos do rascunho */}
+            {draftPoints.map((p, i) => (
+              <Marker key={i} latitude={p.lat} longitude={p.lng} anchor="center">
+                <div className="w-3 h-3 rounded-full border-2 border-white shadow"
+                  style={{ backgroundColor: draftColor }} />
+              </Marker>
+            ))}
+          </Map>
+        </div>
+      </div>
+    </div>
+  );
+};

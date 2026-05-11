@@ -132,12 +132,22 @@ export interface ActivityLog {
   created_at: string;
 }
 
+export interface Zone {
+  id: string;
+  name: string;
+  color: string;
+  /** Array de vértices do polígono */
+  coordinates: { lat: number; lng: number }[];
+  created_at: string;
+}
+
 export type ViewState =
   | { type: 'ROLE_SELECT' }
   | { type: 'ADMIN_LOGIN' }
   | { type: 'ADMIN_DASHBOARD' }
   | { type: 'ADMIN_AUDIT' }
   | { type: 'ADMIN_ROUTING' }
+  | { type: 'ADMIN_ZONES' }
   | { type: 'DRIVER_LOGIN' }
   | { type: 'DRIVER_LIST'; driverId: string }
   | { type: 'DRIVER_ACTION'; driverId: string; invoiceId: string }

@@ -7,6 +7,7 @@ import { DriverView } from './components/DriverView';
 import { AdminAuditView } from './components/AdminAuditView';
 import { SellerView } from './components/SellerView';
 import { RoteirizacaoView } from './components/RoteirizacaoView';
+import { ZonasView } from './components/ZonasView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -291,7 +292,15 @@ const App: React.FC = () => {
 
       case 'ADMIN_ROUTING':
         return (
-          <RoteirizacaoView onBack={() => setView({ type: 'ADMIN_DASHBOARD' })} />
+          <RoteirizacaoView
+            onBack={() => setView({ type: 'ADMIN_DASHBOARD' })}
+            onNavigateToZones={() => setView({ type: 'ADMIN_ZONES' })}
+          />
+        );
+
+      case 'ADMIN_ZONES':
+        return (
+          <ZonasView onBack={() => setView({ type: 'ADMIN_DASHBOARD' })} />
         );
 
       case 'DRIVER_LIST':
