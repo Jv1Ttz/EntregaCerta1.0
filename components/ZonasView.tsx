@@ -3,7 +3,7 @@ import { db } from '../services/db';
 import { Zone } from '../types';
 import {
   ChevronLeft, Plus, Trash2, Pencil, Check, X, Loader2,
-  MousePointer2, Hexagon,
+  MousePointer2, Hexagon, PenLine, Move,
 } from 'lucide-react';
 import Map, { Marker, NavigationControl, Source, Layer } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -45,6 +45,10 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
 
+  // ── Edit polygon mode ────────────────────────────────────────────────────
+  const [editingPolygonId, setEditingPolygonId] = useState<string | null>(null);
+  const [editingPolygonColor, setEditingPolygonColor] = useState(ZONE_COLORS[0]);
+
   useEffect(() => {
     db.getZones().then(z => { setZones(z); setLoading(false); });
   }, []);
@@ -57,6 +61,7 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
     setDraftColor(next);
     setDraftPoints([]);
     setDrawing(true);
+    setEditingPolygonId(null);
   };
 
   const cancelDraw = () => {
@@ -67,10 +72,23 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
   };
 
   const handleMapClick = useCallback((e: { lngLat: { lat: number; lng: number } }) => {
-    if (!drawing || namingZone) return;
+    if (namingZone) return;
     const { lng, lat } = e.lngLat;
-    setDraftPoints(prev => [...prev, { lat, lng }]);
-  }, [drawing, namingZone]);
+
+    if (editingPolygonId) {
+      // Não adiciona ponto se o clique foi perto de um vértice existente
+      // (usuário provavelmente estava clicando no marcador)
+      const tooClose = draftPoints.some(p =>
+        Math.abs(p.lat - lat) < 0.0008 && Math.abs(p.lng - lng) < 0.0008
+      );
+      if (!tooClose) setDraftPoints(prev => [...prev, { lat, lng }]);
+      return;
+    }
+
+    if (drawing) {
+      setDraftPoints(prev => [...prev, { lat, lng }]);
+    }
+  }, [drawing, namingZone, editingPolygonId, draftPoints]);
 
   const closeDraft = () => {
     if (draftPoints.length < 3) return;
@@ -88,9 +106,55 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
     } finally { setSaving(false); }
   };
 
+  // ── Edit polygon helpers ─────────────────────────────────────────────────
+
+  const startEditPolygon = (zone: Zone) => {
+    setEditingPolygonId(zone.id);
+    setEditingPolygonColor(zone.color);
+    setDraftPoints([...zone.coordinates]);
+    setDrawing(false);
+    setNamingZone(false);
+    setEditingId(null);
+  };
+
+  const cancelEditPolygon = () => {
+    setEditingPolygonId(null);
+    setDraftPoints([]);
+  };
+
+  const saveEditPolygon = async () => {
+    if (!editingPolygonId || draftPoints.length < 3) return;
+    setSaving(true);
+    try {
+      await db.updateZone(editingPolygonId, {
+        coordinates: draftPoints,
+        color: editingPolygonColor,
+      });
+      setZones(prev => prev.map(z =>
+        z.id === editingPolygonId
+          ? { ...z, coordinates: draftPoints, color: editingPolygonColor }
+          : z
+      ));
+      cancelEditPolygon();
+    } finally { setSaving(false); }
+  };
+
+  const handleVertexDrag = useCallback((idx: number, lat: number, lng: number) => {
+    setDraftPoints(prev => prev.map((p, i) => i === idx ? { lat, lng } : p));
+  }, []);
+
+  const handleDeleteVertex = (idx: number) => {
+    setDraftPoints(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleUndoLastVertex = () => {
+    setDraftPoints(prev => prev.slice(0, -1));
+  };
+
   // ── CRUD helpers ─────────────────────────────────────────────────────────
 
   const deleteZone = async (id: string) => {
+    if (editingPolygonId === id) cancelEditPolygon();
     await db.deleteZone(id);
     setZones(prev => prev.filter(z => z.id !== id));
   };
@@ -115,6 +179,12 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
       properties: {},
     };
   };
+
+  // ── Derivados ─────────────────────────────────────────────────────────────
+
+  const editingZone = editingPolygonId ? zones.find(z => z.id === editingPolygonId) : null;
+  const isEditingPolygon = !!editingPolygonId;
+  const mapCursor = (drawing && !namingZone) || isEditingPolygon ? 'crosshair' : 'default';
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -145,15 +215,88 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
         {/* ── Painel esquerdo ─────────────────────────────────────────────── */}
         <div className="w-72 shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-white dark:bg-slate-800">
 
-          {/* Controles de desenho */}
+          {/* Controles */}
           <div className="p-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
-            {!drawing ? (
+
+            {/* ── Modo: editar polígono ── */}
+            {isEditingPolygon && (
+              <div className="space-y-3">
+                {/* Cabeçalho do modo */}
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: editingPolygonColor }} />
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-200 truncate flex-1">
+                    {editingZone?.name}
+                  </span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-1.5 py-0.5 rounded">
+                    Editando
+                  </span>
+                </div>
+
+                {/* Seletor de cor */}
+                <div>
+                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">Cor da zona</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ZONE_COLORS.map(c => (
+                      <button key={c} onClick={() => setEditingPolygonColor(c)}
+                        className="w-6 h-6 rounded-full border-2 transition-all"
+                        style={{
+                          backgroundColor: c,
+                          borderColor: editingPolygonColor === c ? '#1e293b' : 'transparent',
+                          transform: editingPolygonColor === c ? 'scale(1.2)' : 'scale(1)',
+                        }} />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Contagem de vértices */}
+                <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400
+                  bg-slate-50 dark:bg-slate-700/50 rounded-lg px-3 py-2">
+                  <span>{draftPoints.length} vértice{draftPoints.length !== 1 ? 's' : ''}</span>
+                  {draftPoints.length > 3 && (
+                    <button onClick={handleUndoLastVertex}
+                      className="text-orange-500 hover:text-orange-600 font-medium transition-colors cursor-pointer">
+                      ↩ Desfazer último
+                    </button>
+                  )}
+                </div>
+
+                {/* Instrução */}
+                <p className="text-xs text-slate-400 dark:text-slate-500 text-center leading-relaxed">
+                  Arraste os vértices para movê-los.<br />
+                  Clique no mapa para adicionar pontos.<br />
+                  Clique em × para remover um vértice.
+                </p>
+
+                {/* Botões */}
+                <div className="flex gap-2">
+                  <button onClick={saveEditPolygon}
+                    disabled={draftPoints.length < 3 || saving}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3
+                      bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed
+                      text-white font-bold rounded-lg text-sm transition-colors">
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                    Salvar
+                  </button>
+                  <button onClick={cancelEditPolygon}
+                    className="flex items-center justify-center px-3 py-2 rounded-lg text-sm
+                      bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600
+                      text-slate-600 dark:text-slate-300 transition-colors">
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Modo: desenhar nova zona ── */}
+            {!isEditingPolygon && !drawing && (
               <button onClick={startDraw}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5
                   bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-sm transition-colors">
                 <Plus size={16} /> Nova Zona
               </button>
-            ) : (
+            )}
+
+            {!isEditingPolygon && drawing && (
               <div className="space-y-3">
                 {/* Seletor de cor */}
                 <div>
@@ -196,52 +339,80 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
             )}
           </div>
 
-          {/* Lista de zonas */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {loading ? (
-              <div className="flex justify-center py-8">
-                <Loader2 size={24} className="animate-spin text-indigo-400" />
-              </div>
-            ) : zones.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400 text-center py-12">
-                <Hexagon size={40} className="opacity-30" />
-                <p className="text-sm">Nenhuma zona criada ainda.<br />Clique em "Nova Zona" e<br />desenhe no mapa.</p>
-              </div>
-            ) : zones.map(zone => (
-              <div key={zone.id}
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg border
-                  bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600">
-                <div className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
-                {editingId === zone.id ? (
-                  <input autoFocus value={editingName}
-                    onChange={e => setEditingName(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingId(null); }}
-                    className="flex-1 text-sm bg-white dark:bg-slate-800 border border-indigo-300 rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-indigo-400" />
-                ) : (
-                  <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{zone.name}</span>
-                )}
-                {editingId === zone.id ? (
-                  <button onClick={saveEdit} className="text-green-500 hover:text-green-600 shrink-0 cursor-pointer">
-                    <Check size={14} />
-                  </button>
-                ) : (
-                  <>
-                    <button onClick={() => startEdit(zone)}
-                      className="text-slate-400 hover:text-indigo-500 transition-colors shrink-0 cursor-pointer">
-                      <Pencil size={13} />
+          {/* Lista de zonas — oculta durante edição de polígono */}
+          {!isEditingPolygon && (
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 size={24} className="animate-spin text-indigo-400" />
+                </div>
+              ) : zones.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400 text-center py-12">
+                  <Hexagon size={40} className="opacity-30" />
+                  <p className="text-sm">Nenhuma zona criada ainda.<br />Clique em "Nova Zona" e<br />desenhe no mapa.</p>
+                </div>
+              ) : zones.map(zone => (
+                <div key={zone.id}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-lg border
+                    bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600">
+                  <div className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
+                  {editingId === zone.id ? (
+                    <input autoFocus value={editingName}
+                      onChange={e => setEditingName(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingId(null); }}
+                      className="flex-1 text-sm bg-white dark:bg-slate-800 border border-indigo-300 rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-indigo-400" />
+                  ) : (
+                    <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{zone.name}</span>
+                  )}
+                  {editingId === zone.id ? (
+                    <button onClick={saveEdit} className="text-green-500 hover:text-green-600 shrink-0 cursor-pointer">
+                      <Check size={14} />
                     </button>
-                    <button onClick={() => deleteZone(zone.id)}
-                      className="text-slate-400 hover:text-red-500 transition-colors shrink-0 cursor-pointer">
-                      <Trash2 size={13} />
-                    </button>
-                  </>
-                )}
+                  ) : (
+                    <>
+                      {/* Renomear */}
+                      <button onClick={() => startEdit(zone)} title="Renomear zona"
+                        className="text-slate-400 hover:text-indigo-500 transition-colors shrink-0 cursor-pointer">
+                        <Pencil size={13} />
+                      </button>
+                      {/* Editar polígono */}
+                      <button onClick={() => startEditPolygon(zone)} title="Editar forma da zona"
+                        className="text-slate-400 hover:text-violet-500 transition-colors shrink-0 cursor-pointer">
+                        <PenLine size={13} />
+                      </button>
+                      {/* Deletar */}
+                      <button onClick={() => deleteZone(zone.id)} title="Excluir zona"
+                        className="text-slate-400 hover:text-red-500 transition-colors shrink-0 cursor-pointer">
+                        <Trash2 size={13} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Lista reduzida durante edição — mostra só a zona sendo editada */}
+          {isEditingPolygon && (
+            <div className="flex-1 overflow-y-auto p-3">
+              <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wide mb-2 px-1">
+                Outras zonas
+              </p>
+              <div className="space-y-1.5 opacity-40 pointer-events-none select-none">
+                {zones.filter(z => z.id !== editingPolygonId).map(zone => (
+                  <div key={zone.id}
+                    className="flex items-center gap-2 px-3 py-2 rounded-lg border
+                      bg-slate-50 dark:bg-slate-700/50 border-slate-200 dark:border-slate-600">
+                    <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate">{zone.name}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
 
           {/* Dica de uso */}
-          {zones.length > 0 && !drawing && (
+          {zones.length > 0 && !drawing && !isEditingPolygon && (
             <div className="p-3 border-t border-slate-200 dark:border-slate-700 shrink-0">
               <p className="text-xs text-slate-400 dark:text-slate-500 text-center">
                 Zonas são reutilizadas automaticamente<br />na tela de Roteirização.
@@ -251,16 +422,25 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
         </div>
 
         {/* ── Mapa ────────────────────────────────────────────────────────── */}
-        <div className="flex-1 relative min-h-0"
-          style={{ cursor: drawing && !namingZone ? 'crosshair' : 'default' }}>
+        <div className="flex-1 relative min-h-0" style={{ cursor: mapCursor }}>
 
-          {/* Banner de instrução */}
+          {/* Banner — modo desenho */}
           {drawing && !namingZone && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none
               bg-indigo-600 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg
               flex items-center gap-2">
               <MousePointer2 size={15} />
               Clique para marcar os vértices · Mínimo 3 pontos
+            </div>
+          )}
+
+          {/* Banner — modo edição polígono */}
+          {isEditingPolygon && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none
+              bg-violet-600 text-white text-sm font-semibold px-4 py-2 rounded-full shadow-lg
+              flex items-center gap-2">
+              <Move size={15} />
+              Arraste os vértices · Clique no mapa para adicionar
             </div>
           )}
 
@@ -308,38 +488,99 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
           >
             <NavigationControl position="bottom-right" />
 
-            {/* Zonas salvas */}
+            {/* ── Zonas salvas ── */}
             {zones.map(zone => {
               if (zone.coordinates.length < 3) return null;
+              const isBeingEdited = zone.id === editingPolygonId;
+
+              // Durante edição, mostra o rascunho (draftPoints) em vez das coords salvas
+              const coords = isBeingEdited ? draftPoints : zone.coordinates;
+              const color = isBeingEdited ? editingPolygonColor : zone.color;
+              if (coords.length < 3) return null;
+
               return (
                 <React.Fragment key={zone.id}>
-                  <Source type="geojson" data={toGeoJson(zone.coordinates)}>
-                    <Layer type="fill" paint={{ 'fill-color': zone.color, 'fill-opacity': 0.18 }} />
-                    <Layer type="line" paint={{ 'line-color': zone.color, 'line-width': 2.5 }} />
+                  <Source type="geojson" data={toGeoJson(coords)}>
+                    <Layer type="fill" paint={{
+                      'fill-color': color,
+                      'fill-opacity': isBeingEdited ? 0.12 : 0.18,
+                    }} />
+                    <Layer type="line" paint={{
+                      'line-color': color,
+                      'line-width': isBeingEdited ? 2 : 2.5,
+                      ...(isBeingEdited ? { 'line-dasharray': [3, 2] } : {}),
+                    }} />
                   </Source>
-                  {/* Label centrado */}
-                  {(() => { const c = centroid(zone.coordinates); return (
-                    <Marker latitude={c.lat} longitude={c.lng} anchor="center">
-                      <div className="px-2 py-0.5 rounded-full text-white text-[11px] font-bold shadow-md pointer-events-none select-none"
-                        style={{ backgroundColor: zone.color }}>
-                        {zone.name}
-                      </div>
-                    </Marker>
-                  ); })()}
+
+                  {/* Label centrado — oculto durante edição da própria zona */}
+                  {!isBeingEdited && (() => {
+                    const c = centroid(coords);
+                    return (
+                      <Marker latitude={c.lat} longitude={c.lng} anchor="center">
+                        <div className="px-2 py-0.5 rounded-full text-white text-[11px] font-bold shadow-md pointer-events-none select-none"
+                          style={{ backgroundColor: color }}>
+                          {zone.name}
+                        </div>
+                      </Marker>
+                    );
+                  })()}
                 </React.Fragment>
               );
             })}
 
-            {/* Polígono em rascunho */}
-            {draftPoints.length >= 2 && (
+            {/* ── Vértices arrastáveis (modo edição de polígono) ── */}
+            {isEditingPolygon && draftPoints.map((p, i) => (
+              <Marker
+                key={`edit-vertex-${i}`}
+                latitude={p.lat}
+                longitude={p.lng}
+                anchor="center"
+                draggable
+                onDragEnd={(e: { lngLat: { lat: number; lng: number } }) =>
+                  handleVertexDrag(i, e.lngLat.lat, e.lngLat.lng)
+                }
+              >
+                <div
+                  className="relative group"
+                  onClick={e => e.stopPropagation()}
+                >
+                  {/* Número do vértice */}
+                  <div
+                    className="w-5 h-5 rounded-full border-2 border-white shadow-lg
+                      flex items-center justify-center text-white text-[9px] font-bold
+                      cursor-grab active:cursor-grabbing"
+                    style={{ backgroundColor: editingPolygonColor }}
+                  >
+                    {i + 1}
+                  </div>
+
+                  {/* Botão deletar — aparece no hover */}
+                  {draftPoints.length > 3 && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteVertex(i); }}
+                      title="Remover vértice"
+                      className="absolute -top-2.5 -right-2.5 w-4 h-4 rounded-full
+                        bg-red-500 hover:bg-red-600 text-white border border-white shadow
+                        text-[10px] leading-none flex items-center justify-center
+                        opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              </Marker>
+            ))}
+
+            {/* ── Polígono em rascunho (nova zona) ── */}
+            {drawing && draftPoints.length >= 2 && (
               <Source type="geojson" data={toGeoJson(draftPoints, draftPoints.length >= 3)}>
                 <Layer type="fill" paint={{ 'fill-color': draftColor, 'fill-opacity': 0.15 }} />
                 <Layer type="line" paint={{ 'line-color': draftColor, 'line-width': 2, 'line-dasharray': [2, 1.5] }} />
               </Source>
             )}
 
-            {/* Pontos do rascunho */}
-            {draftPoints.map((p, i) => (
+            {/* Pontos do rascunho (nova zona) */}
+            {drawing && draftPoints.map((p, i) => (
               <Marker key={i} latitude={p.lat} longitude={p.lng} anchor="center">
                 <div className="w-3 h-3 rounded-full border-2 border-white shadow"
                   style={{ backgroundColor: draftColor }} />

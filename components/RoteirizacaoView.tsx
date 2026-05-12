@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { Invoice, Vehicle, Zone } from '../types';
 import {
@@ -11,6 +11,21 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
 const ROT_ORIGIN = { lat: -12.931685, lng: -38.512682 };
+
+/** Cores distintas para cada veículo no roteiro (independente da cor da zona) */
+const VEHICLE_COLORS = [
+  '#4f46e5', // indigo
+  '#dc2626', // red
+  '#16a34a', // green
+  '#d97706', // amber
+  '#7c3aed', // violet
+  '#0891b2', // cyan
+  '#be185d', // pink
+  '#15803d', // green-dark
+];
+function getVehicleColor(globalIdx: number) {
+  return VEHICLE_COLORS[globalIdx % VEHICLE_COLORS.length];
+}
 
 // ── Algoritmos ──────────────────────────────────────────────────────────────
 
@@ -57,6 +72,99 @@ function nearestNeighborOrder(invoices: Invoice[], origin: { lat: number; lng: n
   return result;
 }
 
+interface RouteInfo {
+  coords: number[][];
+  distanceM: number; // metros
+  durationS: number; // segundos
+}
+
+/**
+ * Busca rota pelas ruas usando Mapbox Directions API.
+ * Suporta mais de 25 waypoints dividindo em chunks encadeados.
+ * Retorna coords + distância total (m) + duração total (s).
+ */
+async function fetchRoadRoute(waypoints: { lat: number; lng: number }[]): Promise<RouteInfo> {
+  const empty: RouteInfo = { coords: [], distanceM: 0, durationS: 0 };
+  if (waypoints.length < 2) return empty;
+
+  const MAX_WP = 25;
+  const allCoords: number[][] = [];
+  let totalDist = 0;
+  let totalDur = 0;
+  let start = 0;
+
+  while (start < waypoints.length - 1) {
+    const chunk = waypoints.slice(start, start + MAX_WP);
+    const coordStr = chunk.map(p => `${p.lng},${p.lat}`).join(';');
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/directions/v5/mapbox/driving/${coordStr}` +
+        `?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
+      );
+      const data = await res.json();
+      const route = data.routes?.[0];
+      if (route) {
+        const coords: number[][] = route.geometry?.coordinates ?? [];
+        allCoords.push(...(allCoords.length > 0 ? coords.slice(1) : coords));
+        totalDist += route.distance ?? 0;
+        totalDur  += route.duration ?? 0;
+      }
+    } catch { /* silencioso — fallback para linha reta */ }
+    start += MAX_WP - 1;
+  }
+  return { coords: allCoords, distanceM: totalDist, durationS: totalDur };
+}
+
+/**
+ * Divide notas entre n veículos respeitando co-localização:
+ * notas no mesmo endereço (lat/lng idênticos) ficam sempre no mesmo veículo.
+ */
+function splitRespectingLocations(invoices: Invoice[], n: number): Invoice[][] {
+  if (n <= 1) return [invoices];
+
+  // Agrupa notas consecutivas no mesmo local
+  const groups: Invoice[][] = [];
+  for (const inv of invoices) {
+    const last = groups[groups.length - 1];
+    if (last && last[0].lat === inv.lat && last[0].lng === inv.lng
+        && inv.lat != null && inv.lng != null) {
+      last.push(inv);
+    } else {
+      groups.push([inv]);
+    }
+  }
+
+  // Divide os grupos evenly e depois achata cada fatia
+  const splitGroups = splitEvenly(groups, n);
+  return splitGroups.map(gs => gs.flat());
+}
+
+/** Divide um array em n partes aproximadamente iguais */
+function splitEvenly<T>(arr: T[], n: number): T[][] {
+  if (n <= 1) return [arr];
+  const result: T[][] = [];
+  const base = Math.floor(arr.length / n);
+  const extra = arr.length % n;
+  let cursor = 0;
+  for (let i = 0; i < n; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    result.push(arr.slice(cursor, cursor + size));
+    cursor += size;
+  }
+  return result.filter(c => c.length > 0);
+}
+
+function fmtDist(meters: number): string {
+  return `${(meters / 1000).toFixed(1)} km`;
+}
+
+function fmtDur(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  if (h === 0) return `${m} min`;
+  return `${h}h ${m < 10 ? '0' : ''}${m}min`;
+}
+
 async function geocodeInvoice(invoice: Invoice): Promise<Invoice> {
   if (invoice.lat && invoice.lng) return invoice;
   try {
@@ -97,11 +205,15 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
 
   /** plan: zoneId → Invoice[] */
   const [plan, setPlan] = useState<Record<string, Invoice[]>>({});
-  /** zoneVehicles: zoneId → vehicleId selecionado */
-  const [zoneVehicles, setZoneVehicles] = useState<Record<string, string>>({});
+  /** zoneVehicles: zoneId → lista de vehicleIds (suporte a múltiplos veículos) */
+  const [zoneVehicles, setZoneVehicles] = useState<Record<string, string[]>>({});
 
   const [generating, setGenerating] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  /** Rota real pelas ruas por zona: coords + distância + duração */
+  const [roadRoutes, setRoadRoutes] = useState<Record<string, RouteInfo>>({});
+  const [fetchingRoutes, setFetchingRoutes] = useState(false);
+  const [hoveredPinKey, setHoveredPinKey] = useState<string | null>(null);
   const [addingInvId, setAddingInvId] = useState<string | null>(null);
   const [excludedIds, setExcludedIds] = useState<string[]>([]);
   const [showExcluded, setShowExcluded] = useState(false);
@@ -117,11 +229,74 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
     });
   }, []);
 
+  /**
+   * Sempre que o plano ou os veículos mudam, re-busca as rotas pelas ruas.
+   * Cada veículo tem sua própria rota partindo do ROT_ORIGIN.
+   * Chave: `${zoneId}:${vehicleIdx}`
+   */
+  useEffect(() => {
+    const isEmpty = Object.values(plan).every(invs => invs.length === 0);
+    if (isEmpty) { setRoadRoutes({}); return; }
+
+    setFetchingRoutes(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results: Record<string, RouteInfo> = {};
+        // Usa os clusters já calculados pelo K-Means (via vaRef)
+        await Promise.all(
+          vaRef.current.map(async ({ routeKey, notes }) => {
+            const withCoords = notes.filter(n => n.lat && n.lng);
+            if (withCoords.length === 0) return;
+            const waypoints = [ROT_ORIGIN, ...withCoords.map(n => ({ lat: n.lat!, lng: n.lng! }))];
+            results[routeKey] = await fetchRoadRoute(waypoints);
+          })
+        );
+        setRoadRoutes(results);
+      } finally {
+        setFetchingRoutes(false);
+      }
+    }, 600);
+
+    return () => { clearTimeout(timer); setFetchingRoutes(false); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, zoneVehicles]);
+
   // ── Derivados ─────────────────────────────────────────────────────────────
 
+  // Todas as notas pendentes não excluídas — independente da data de importação
   const dayInvoices = invoices.filter(inv =>
-    inv.created_at?.startsWith(rotDate) && inv.status === 'PENDING' && !inv.deleted_at
+    inv.status === 'PENDING' && !inv.deleted_at
   );
+
+  /**
+   * Lista plana de atribuições veículo→notas, com cor distinta por veículo.
+   * Usa K-Means geográfico para zonas com múltiplos veículos.
+   * Memoizado — só recalcula quando plan ou zoneVehicles mudam.
+   */
+  const vehicleAssignments = useMemo(() => {
+    let globalIdx = 0;
+    return zones.flatMap(zone => {
+      const vIds  = zoneVehicles[zone.id] ?? [];
+      const count = Math.max(vIds.length, 1);
+      const notes = plan[zone.id] ?? [];
+      const chunks = splitRespectingLocations(notes, count);
+      return Array.from({ length: count }, (_, vi) => {
+        const color = getVehicleColor(globalIdx++);
+        return {
+          zone,
+          vi,
+          vehicleId: vIds[vi] ?? '',
+          notes: chunks[vi] ?? [],
+          color,
+          routeKey: `${zone.id}:${vi}`,
+        };
+      });
+    });
+  }, [plan, zoneVehicles, zones]);
+
+  // Ref para o useEffect acessar vehicleAssignments sem dependência circular
+  const vaRef = useRef(vehicleAssignments);
+  vaRef.current = vehicleAssignments;
   const hasPlan = Object.keys(plan).length > 0;
   const assignedIds = new Set(Object.values(plan).flat().map(i => i.id));
   const eligibleInvoices = dayInvoices.filter(inv => !excludedIds.includes(inv.id));
@@ -293,17 +468,16 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
     setConfirming(true);
     try {
       await Promise.all(
-        Object.entries(plan).map(([zoneId, invs]) => {
-          const vehicleId = zoneVehicles[zoneId];
-          if (!vehicleId || invs.length === 0) return Promise.resolve();
-          return db.assignVehicleToInvoices(vehicleId, invs.map(i => i.id));
-        })
+        vehicleAssignments
+          .filter(va => va.vehicleId && va.notes.length > 0)
+          .map(va => db.assignVehicleToInvoices(va.vehicleId, va.notes.map(i => i.id)))
       );
       onBack();
     } finally { setConfirming(false); }
   };
 
-  const canConfirm = hasPlan && Object.entries(plan).some(([zId, invs]) => invs.length > 0 && zoneVehicles[zId]);
+  const canConfirm = hasPlan &&
+    vehicleAssignments.some(va => va.vehicleId && va.notes.length > 0);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -363,9 +537,14 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
           </div>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <input type="date" value={rotDate}
-            onChange={e => { setRotDate(e.target.value); setPlan({}); setZoneVehicles({}); }}
-            className="px-3 py-1.5 rounded-lg bg-white/20 border border-white/30 text-white text-sm outline-none focus:ring-2 focus:ring-white/50" />
+          <div className="flex flex-col items-end">
+            <label className="text-violet-300 text-[10px] font-bold uppercase tracking-wide mb-0.5">
+              Data de entrega
+            </label>
+            <input type="date" value={rotDate}
+              onChange={e => setRotDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-white/20 border border-white/30 text-white text-sm outline-none focus:ring-2 focus:ring-white/50" />
+          </div>
           <span className="text-violet-200 text-sm font-medium">
             {eligibleInvoices.length} notas elegíveis
             {excludedInvoices.length > 0 && (
@@ -422,6 +601,7 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
               const notes = plan[zone.id] ?? [];
               const isOver = dragOverZoneId === zone.id;
               const color = zone.color;
+              const routeInfo = roadRoutes[zone.id];
 
               return (
                 <div key={zone.id}
@@ -438,22 +618,95 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
                     <span className="text-xs font-bold shrink-0" style={{ color }}>{notes.length} paradas</span>
                   </div>
 
-                  {/* Seletor de veículo */}
-                  <div className="px-2 pt-2">
-                    <select
-                      value={zoneVehicles[zone.id] ?? ''}
-                      onChange={e => setZoneVehicles(prev => ({ ...prev, [zone.id]: e.target.value }))}
-                      className="w-full text-xs rounded-md border border-slate-200 dark:border-slate-600
-                        bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200
-                        px-2 py-1.5 outline-none focus:ring-1 focus:ring-violet-400">
-                      <option value="">— Selecionar veículo —</option>
-                      {vehicles.map(v => (
-                        <option key={v.id} value={v.id}>{v.plate} — {v.model}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {/* Indicadores de distância e tempo */}
+                  {routeInfo && routeInfo.distanceM > 0 && (
+                    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-slate-100 dark:border-slate-700"
+                      style={{ backgroundColor: color + '0a' }}>
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                        🛣️ {fmtDist(routeInfo.distanceM)}
+                      </span>
+                      <span className="text-[11px] text-slate-400">·</span>
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                        ⏱ {fmtDur(routeInfo.durationS)}
+                      </span>
+                      {fetchingRoutes && (
+                        <Loader2 size={10} className="animate-spin text-slate-300 ml-auto" />
+                      )}
+                    </div>
+                  )}
 
-                  {/* Cards das notas */}
+                  {/* Seletores de veículos com cor por veículo */}
+                  {(() => {
+                    const zoneVAs = vehicleAssignments.filter(va => va.zone.id === zone.id);
+                    const vIds = zoneVehicles[zone.id] ?? [];
+                    const usedInZone = new Set(vIds.filter(Boolean));
+                    return (
+                      <div className="px-2 pt-2 space-y-1">
+                        {zoneVAs.map(({ vi, vehicleId: vId, color: vColor, notes: vNotes }) => (
+                          <div key={vi} className="flex items-center gap-1.5">
+                            {/* Swatch de cor do veículo */}
+                            <div className="w-2.5 h-2.5 rounded-full shrink-0 ring-1 ring-white/50"
+                              style={{ backgroundColor: vColor }} />
+                            <select
+                              value={vId}
+                              onChange={e => setZoneVehicles(prev => {
+                                const cur = [...(prev[zone.id] ?? [])];
+                                cur[vi] = e.target.value;
+                                return { ...prev, [zone.id]: cur };
+                              })}
+                              className="flex-1 text-xs rounded-md border border-slate-200 dark:border-slate-600
+                                bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200
+                                px-2 py-1.5 outline-none focus:ring-1"
+                              style={{ '--tw-ring-color': vColor } as React.CSSProperties}>
+                              <option value="">— Veículo {vi + 1} —</option>
+                              {vehicles.map(v => (
+                                <option key={v.id} value={v.id}
+                                  disabled={usedInZone.has(v.id) && v.id !== vId}>
+                                  {v.plate} — {v.model}
+                                </option>
+                              ))}
+                            </select>
+                            {/* Contagem de notas deste veículo */}
+                            {hasPlan && vNotes.length > 0 && (
+                              <span className="text-[10px] font-bold shrink-0 px-1 py-0.5 rounded"
+                                style={{ backgroundColor: vColor + '22', color: vColor }}>
+                                {vNotes.length}
+                              </span>
+                            )}
+                            {/* Remover veículo */}
+                            {vIds.length > 1 && (
+                              <button
+                                onClick={() => setZoneVehicles(prev => {
+                                  const cur = (prev[zone.id] ?? []).filter((_, i) => i !== vi);
+                                  return { ...prev, [zone.id]: cur };
+                                })}
+                                className="w-5 h-5 shrink-0 flex items-center justify-center rounded-full
+                                  bg-red-100 hover:bg-red-200 text-red-500 transition-colors cursor-pointer">
+                                <X size={10} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+
+                        {/* Botão adicionar veículo */}
+                        {notes.length > 1 && (zoneVehicles[zone.id] ?? []).length < vehicles.length && (
+                          <button
+                            onClick={() => setZoneVehicles(prev => ({
+                              ...prev,
+                              [zone.id]: [...(prev[zone.id] ?? ['']), ''],
+                            }))}
+                            className="w-full flex items-center justify-center gap-1 py-1 rounded-md text-[11px]
+                              border border-dashed border-slate-300 dark:border-slate-600
+                              text-slate-400 hover:text-violet-500 hover:border-violet-300
+                              transition-colors cursor-pointer">
+                            <Plus size={10} /> Adicionar veículo
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Cards das notas com divisor por veículo */}
                   <div className="p-2 space-y-1 min-h-[52px]">
                     {notes.length === 0 && (
                       <div className={`text-center text-xs py-3 rounded border-2 border-dashed transition-colors ${
@@ -463,10 +716,35 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
                         {isOver ? 'Solte aqui' : 'Sem notas nesta zona'}
                       </div>
                     )}
-                    {notes.map((inv, order) => {
-                      const isCardOver = dragOverInvId === inv.id && dragOverZoneId === zone.id;
-                      return (
-                        <div key={inv.id}
+                    {(() => {
+                      const zoneVAs = vehicleAssignments.filter(va => va.zone.id === zone.id);
+                      const vCount = zoneVAs.length;
+                      // Monta mapa invId → cor do veículo
+                      const invColor: Record<string, string> = {};
+                      zoneVAs.forEach(va => va.notes.forEach(n => { invColor[n.id] = va.color; }));
+                      // Índices de início de cada grupo (para inserir divisor)
+                      const splitStarts = new Set<number>();
+                      if (vCount > 1) {
+                        let acc = 0;
+                        zoneVAs.forEach((va, i) => { if (i > 0) splitStarts.add(acc); acc += va.notes.length; });
+                      }
+                      return notes.map((inv, order) => {
+                        const isCardOver = dragOverInvId === inv.id && dragOverZoneId === zone.id;
+                        const badgeColor = invColor[inv.id] ?? color;
+                        const vaForNote = zoneVAs.find(va => va.notes.some(n => n.id === inv.id));
+                        return (
+                          <React.Fragment key={inv.id}>
+                            {splitStarts.has(order) && vaForNote && (
+                              <div className="flex items-center gap-1.5 py-1">
+                                <div className="flex-1 h-px" style={{ backgroundColor: vaForNote.color + '55' }} />
+                                <span className="text-[9px] font-bold uppercase tracking-wide"
+                                  style={{ color: vaForNote.color }}>
+                                  Veículo {vaForNote.vi + 1}
+                                </span>
+                                <div className="flex-1 h-px" style={{ backgroundColor: vaForNote.color + '55' }} />
+                              </div>
+                            )}
+                        <div
                           draggable
                           onDragStart={() => onDragStart(inv.id, zone.id)}
                           onDragEnd={onDragEnd}
@@ -480,7 +758,7 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
                           }`}>
                           <GripVertical size={11} className="text-slate-300 dark:text-slate-500 shrink-0" />
                           <span className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0"
-                            style={{ backgroundColor: color }}>
+                            style={{ backgroundColor: badgeColor }}>
                             {order + 1}
                           </span>
                           <div className="min-w-0 flex-1 overflow-hidden">
@@ -517,8 +795,10 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
                             </button>
                           </div>
                         </div>
-                      );
-                    })}
+                          </React.Fragment>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               );
@@ -638,7 +918,15 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
           {generating && (
             <div className="absolute inset-0 z-10 bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
               <Loader2 size={36} className="animate-spin text-violet-600" />
-              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Geocodificando e calculando rotas...</p>
+              <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">Geocodificando e distribuindo notas...</p>
+            </div>
+          )}
+          {fetchingRoutes && !generating && (
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-10 pointer-events-none
+              bg-slate-800/80 backdrop-blur text-white text-xs font-semibold
+              px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin" />
+              Recalculando percursos pelas ruas...
             </div>
           )}
 
@@ -672,52 +960,199 @@ export const RoteirizacaoView: React.FC<Props> = ({ onBack, onNavigateToZones })
               );
             })}
 
-            {/* Linhas de rota por zona */}
-            {hasPlan && zones.map(zone => {
-              const notes = plan[zone.id] ?? [];
-              const coords = [[ROT_ORIGIN.lng, ROT_ORIGIN.lat], ...notes.filter(n => n.lat && n.lng).map(n => [n.lng!, n.lat!])];
-              if (coords.length < 2) return null;
-              return (
-                <Source key={`route-${zone.id}`} type="geojson" data={{
-                  type: 'Feature' as const,
-                  geometry: { type: 'LineString' as const, coordinates: coords },
-                  properties: {},
-                }}>
-                  <Layer type="line" paint={{ 'line-color': zone.color, 'line-width': 3, 'line-dasharray': [2, 1.5] }} />
-                </Source>
-              );
-            })}
+            {/* Rotas e marcadores por veículo — cor distinta + offset lateral por veículo */}
+            {hasPlan && vehicleAssignments.map(({ zone, vi, notes: vNotes, color: vColor, routeKey }) => {
+              // ── Offset lateral para separar linhas sobrepostas ──
+              const zoneVehicleCount = vehicleAssignments.filter(va => va.zone.id === zone.id).length;
+              // Centraliza os offsets: ex. 2 veículos → [-4, +4], 3 → [-5, 0, +5]
+              const lineOffset = zoneVehicleCount > 1
+                ? (vi - (zoneVehicleCount - 1) / 2) * 5
+                : 0;
 
-            {/* Marcadores das notas */}
-            {hasPlan && zones.map(zone => {
-              const notes = plan[zone.id] ?? [];
-              return notes.filter(n => n.lat && n.lng).map((inv, order) => (
-                <Marker key={inv.id} latitude={inv.lat!} longitude={inv.lng!} anchor="bottom">
-                  <div className="flex flex-col items-center">
-                    <div className="mb-0.5 px-1.5 py-0.5 text-white text-[9px] font-bold rounded shadow"
-                      style={{ backgroundColor: zone.color }}>{order + 1}</div>
-                    <div className="w-6 h-6 rounded-full border-2 border-white shadow-md flex items-center justify-center"
-                      style={{ backgroundColor: zone.color }}>
-                      <Package size={11} className="text-white" />
-                    </div>
-                  </div>
-                </Marker>
-              ));
+              // ── Rota ──
+              const road = roadRoutes[routeKey];
+              const isRoad = !!(road && road.coords.length >= 2);
+              const withCoords = vNotes.filter(n => n.lat && n.lng);
+              const coords: number[][] = isRoad
+                ? road.coords
+                : [[ROT_ORIGIN.lng, ROT_ORIGIN.lat], ...withCoords.map(n => [n.lng!, n.lat!])];
+
+              return (
+                <React.Fragment key={routeKey}>
+                  {/* Linha de rota */}
+                  {coords.length >= 2 && (
+                    <Source type="geojson" data={{
+                      type: 'Feature' as const,
+                      geometry: { type: 'LineString' as const, coordinates: coords },
+                      properties: {},
+                    }}>
+                      {isRoad && (
+                        <Layer type="line" paint={{
+                          'line-color': '#000',
+                          'line-width': 5,
+                          'line-opacity': 0.07,
+                          'line-offset': lineOffset,
+                        }} />
+                      )}
+                      <Layer type="line" paint={{
+                        'line-color': vColor,
+                        'line-width': isRoad ? 4 : 3,
+                        'line-offset': lineOffset,
+                        ...(!isRoad ? { 'line-dasharray': [2, 1.5] } : {}),
+                      }} />
+                    </Source>
+                  )}
+
+                  {/* Marcadores — agrupados quando há múltiplas entregas no mesmo local */}
+                  {(() => {
+                    // Agrupa notas por coordenada exata, preservando invoice completa
+                    const seen = new Set<string>();
+                    const groups: {
+                      key: string; lat: number; lng: number;
+                      orders: number[]; invoices: Invoice[];
+                    }[] = [];
+                    withCoords.forEach((inv, order) => {
+                      const key = `${inv.lat},${inv.lng}`;
+                      if (seen.has(key)) {
+                        const g = groups.find(g => g.key === key)!;
+                        g.orders.push(order + 1);
+                        g.invoices.push(inv);
+                      } else {
+                        seen.add(key);
+                        groups.push({ key, lat: inv.lat!, lng: inv.lng!, orders: [order + 1], invoices: [inv] });
+                      }
+                    });
+
+                    return groups.map(({ key, lat, lng, orders, invoices: groupInvs }) => {
+                      const count = orders.length;
+                      const label = count === 1
+                        ? String(orders[0])
+                        : `${orders[0]}–${orders[count - 1]}`;
+                      const isHovered = hoveredPinKey === key;
+
+                      return (
+                        <Marker key={key} latitude={lat} longitude={lng} anchor="bottom">
+                          <div
+                            className="flex flex-col items-center relative"
+                            onMouseEnter={() => setHoveredPinKey(key)}
+                            onMouseLeave={() => setHoveredPinKey(null)}
+                          >
+                            {/* ── Tooltip ── */}
+                            {isHovered && (
+                              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50
+                                bg-white dark:bg-slate-800 rounded-xl shadow-2xl
+                                border border-slate-200 dark:border-slate-700
+                                w-56 pointer-events-none"
+                                style={{ filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.18))' }}>
+                                {/* Cabeçalho */}
+                                <div className="px-3 py-2 rounded-t-xl flex items-center gap-2"
+                                  style={{ backgroundColor: vColor + '18', borderBottom: `2px solid ${vColor}30` }}>
+                                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: vColor }} />
+                                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                                    {count > 1 ? `${count} entregas neste local` : 'Entrega'}
+                                  </span>
+                                </div>
+
+                                {/* Lista de notas */}
+                                <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                                  {groupInvs.map((inv, i) => (
+                                    <div key={inv.id} className="px-3 py-2">
+                                      <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-white"
+                                          style={{ backgroundColor: vColor }}>
+                                          #{orders[i]}
+                                        </span>
+                                        <span className="text-[10px] font-mono text-slate-400">NF {inv.number}</span>
+                                      </div>
+                                      <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 leading-tight truncate">
+                                        {inv.customer_name}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 mt-0.5 leading-tight truncate">
+                                        {inv.customer_address.split('||')[0]}
+                                      </p>
+                                      <p className="text-[10px] font-semibold mt-0.5"
+                                        style={{ color: vColor }}>
+                                        R$ {inv.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Setinha apontando pro pino */}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0"
+                                  style={{
+                                    borderLeft: '6px solid transparent',
+                                    borderRight: '6px solid transparent',
+                                    borderTop: '6px solid white',
+                                  }} />
+                              </div>
+                            )}
+
+                            {/* Label de ordem */}
+                            <div className="mb-0.5 px-1.5 py-0.5 text-white text-[9px] font-bold rounded shadow"
+                              style={{ backgroundColor: vColor }}>{label}</div>
+
+                            {/* Pino com efeito de pilha */}
+                            <div className="relative">
+                              {count >= 3 && (
+                                <div className="absolute -bottom-1.5 -left-1.5 w-6 h-6 rounded-full border-2 border-white"
+                                  style={{ backgroundColor: vColor, opacity: 0.3 }} />
+                              )}
+                              {count >= 2 && (
+                                <div className="absolute -bottom-0.5 -left-0.5 w-6 h-6 rounded-full border-2 border-white"
+                                  style={{ backgroundColor: vColor, opacity: 0.55 }} />
+                              )}
+                              <div className={`relative w-6 h-6 rounded-full border-2 border-white shadow-md
+                                flex items-center justify-center transition-transform ${isHovered ? 'scale-125' : ''}`}
+                                style={{ backgroundColor: vColor }}>
+                                <Package size={11} className="text-white" />
+                              </div>
+                              {count > 1 && (
+                                <div className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full
+                                  bg-white border border-slate-200 shadow
+                                  flex items-center justify-center text-[9px] font-bold"
+                                  style={{ color: vColor }}>
+                                  {count}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </Marker>
+                      );
+                    });
+                  })()}
+                </React.Fragment>
+              );
             })}
           </Map>
 
           {/* Legenda */}
           {hasPlan && (
             <div className="absolute top-4 left-4 bg-white/95 dark:bg-slate-800/95 backdrop-blur rounded-xl shadow-lg p-4 space-y-2 border border-slate-200 dark:border-slate-700">
-              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Zonas</p>
-              {zones.map(zone => {
-                const v = vehicles.find(x => x.id === zoneVehicles[zone.id]);
+              <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Veículos</p>
+              {vehicleAssignments.map(({ zone, vi, vehicleId, notes: vNotes, color: vColor, routeKey }) => {
+                const v = vehicles.find(x => x.id === vehicleId);
+                const ri = roadRoutes[routeKey];
                 return (
-                  <div key={zone.id} className="flex items-center gap-2.5 text-xs">
-                    <div className="w-7 h-1.5 rounded-full shrink-0" style={{ backgroundColor: zone.color }} />
-                    <span className="font-bold text-slate-700 dark:text-slate-200">{zone.name}</span>
-                    <span className="text-slate-400">{(plan[zone.id] ?? []).length} paradas</span>
-                    {v && <span className="text-slate-400 font-mono">· {v.plate}</span>}
+                  <div key={routeKey} className="space-y-0.5">
+                    <div className="flex items-center gap-2 text-xs">
+                      <div className="w-6 h-1.5 rounded-full shrink-0" style={{ backgroundColor: vColor }} />
+                      <span className="font-bold text-slate-700 dark:text-slate-200 truncate">
+                        {v ? v.plate : `Veículo ${vi + 1}`}
+                      </span>
+                      <span className="text-slate-400 shrink-0">{vNotes.length} paradas</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 pl-8 text-[10px] text-slate-400">
+                      <span className="truncate">{zone.name}</span>
+                      {ri && ri.distanceM > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>{fmtDist(ri.distanceM)}</span>
+                          <span>·</span>
+                          <span>{fmtDur(ri.durationS)}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}
