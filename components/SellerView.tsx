@@ -39,8 +39,8 @@ const STATUS_ICON: Record<DeliveryStatus, React.ReactNode> = {
   [DeliveryStatus.RETURNED]: <RotateCw size={12} />,
 };
 
-/** Abre rastreamento SSW em nova aba com CNPJ e NF pré-preenchidos */
-const trackOnSSW = (invoiceNumber: string) => {
+/** Abre rastreamento SSW em nova aba com CNPJ e NF pré-preenchidos (fallback) */
+const trackOnSSWFallback = (invoiceNumber: string) => {
   const form = document.createElement('form');
   form.action = 'https://ssw.inf.br/2/ssw_resultSSW';
   form.method = 'POST';
@@ -104,6 +104,43 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   // ── paginação ──────────────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+
+  // ── rastreamento SSW ───────────────────────────────────────────────────────
+  const [sswModal, setSswModal] = useState<{
+    open: boolean;
+    invoice: Invoice | null;
+    loading: boolean;
+    events: Array<{ dataHora?: string; local?: string; localUnidade?: string; situacao?: string; ocorrencia?: string; [key: string]: any }>;
+    raw: any;
+    error: string | null;
+  }>({ open: false, invoice: null, loading: false, events: [], raw: null, error: null });
+
+  const openSSWTracking = async (inv: Invoice) => {
+    setSswModal({ open: true, invoice: inv, loading: true, events: [], raw: null, error: null });
+    try {
+      const res = await fetch('https://ssw.inf.br/api/trackingdanfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chave_nfe: inv.access_key }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const events =
+        data?.documento?.tracking ??
+        data?.rastreamento ??
+        data?.ocorrencias ??
+        data?.eventos ??
+        (Array.isArray(data) ? data : []);
+      setSswModal(prev => ({ ...prev, loading: false, events, raw: data }));
+    } catch (err: any) {
+      const isCors = err instanceof TypeError || err?.message?.includes('Failed to fetch');
+      setSswModal(prev => ({
+        ...prev,
+        loading: false,
+        error: isCors ? 'CORS_BLOCKED' : (err?.message || 'Erro desconhecido'),
+      }));
+    }
+  };
 
   // ── comprovante ────────────────────────────────────────────────────────────
   const [viewingProof, setViewingProof] = useState<{ invoice: Invoice; proof: DeliveryProof } | null>(null);
@@ -789,7 +826,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                           {/* Rastrear no SSW — somente TRANSPORTADORA */}
                           {driverMap[inv.driver_id ?? '']?.toUpperCase() === 'TRANSPORTADORA' && (
                             <button
-                              onClick={() => trackOnSSW(inv.number)}
+                              onClick={() => openSSWTracking(inv)}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 transition-colors"
                               title="Rastrear no SSW"
                             >
@@ -841,7 +878,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       {/* Rastrear no SSW — somente TRANSPORTADORA */}
                       {driverMap[inv.driver_id ?? '']?.toUpperCase() === 'TRANSPORTADORA' && (
                         <button
-                          onClick={() => trackOnSSW(inv.number)}
+                          onClick={() => openSSWTracking(inv)}
                           className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30"
                         >
                           <ExternalLink size={12} /> SSW
@@ -926,6 +963,162 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
           </div>
         )}
       </div>)}
+
+      {/* Modal Rastreamento SSW */}
+      {sswModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="p-4 bg-sky-600 dark:bg-sky-700 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="font-bold flex items-center gap-2 text-lg">
+                  <ExternalLink size={20} /> Rastreamento SSW
+                </h3>
+                {sswModal.invoice && (
+                  <p className="text-sky-100 text-sm mt-0.5">
+                    NF {sswModal.invoice.number} • {sswModal.invoice.customer_name}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setSswModal(prev => ({ ...prev, open: false }))} className="hover:bg-white/20 rounded-full p-1.5 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="overflow-y-auto p-5 flex-1">
+              {/* Loading */}
+              {sswModal.loading && (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="animate-spin text-sky-500" size={36} />
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Consultando SSW...</p>
+                </div>
+              )}
+
+              {/* CORS bloqueado */}
+              {!sswModal.loading && sswModal.error === 'CORS_BLOCKED' && (
+                <div className="flex flex-col items-center gap-4 py-8 text-center">
+                  <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-xl p-5 w-full">
+                    <AlertTriangle className="text-amber-500 mx-auto mb-2" size={32} />
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">API bloqueada pelo navegador (CORS)</p>
+                    <p className="text-amber-700 dark:text-amber-300 text-sm mt-1">
+                      O SSW não permite consultas diretas do navegador. Clique abaixo para abrir o rastreamento no site deles.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => sswModal.invoice && trackOnSSWFallback(sswModal.invoice.number)}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    <ExternalLink size={16} /> Abrir no site SSW
+                  </button>
+                </div>
+              )}
+
+              {/* Outro erro */}
+              {!sswModal.loading && sswModal.error && sswModal.error !== 'CORS_BLOCKED' && (
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-5 text-center">
+                  <AlertOctagon className="text-red-500 mx-auto mb-2" size={28} />
+                  <p className="font-semibold text-red-700 dark:text-red-300">Erro ao consultar SSW</p>
+                  <p className="text-red-600 dark:text-red-400 text-xs mt-1 font-mono">{sswModal.error}</p>
+                  <button
+                    onClick={() => sswModal.invoice && trackOnSSWFallback(sswModal.invoice.number)}
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm mx-auto transition-colors"
+                  >
+                    <ExternalLink size={14} /> Abrir no site SSW
+                  </button>
+                </div>
+              )}
+
+              {/* Sem eventos */}
+              {!sswModal.loading && !sswModal.error && sswModal.events.length === 0 && sswModal.raw !== null && (
+                <div className="text-center py-10">
+                  <Package className="mx-auto text-slate-300 dark:text-slate-600 mb-3" size={40} />
+                  <p className="text-slate-500 dark:text-slate-400 font-medium">Nenhuma ocorrência encontrada</p>
+                  <p className="text-slate-400 dark:text-slate-500 text-sm mt-1">A SSW ainda não registrou eventos para esta NF.</p>
+                  <button
+                    onClick={() => sswModal.invoice && trackOnSSWFallback(sswModal.invoice.number)}
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 border border-sky-500 text-sky-600 dark:text-sky-400 rounded-lg text-sm hover:bg-sky-50 dark:hover:bg-sky-900/30 transition-colors"
+                  >
+                    <ExternalLink size={14} /> Ver no site SSW
+                  </button>
+                </div>
+              )}
+
+              {/* Timeline de eventos */}
+              {!sswModal.loading && !sswModal.error && sswModal.events.length > 0 && (
+                <div>
+                  {/* Info do documento */}
+                  {sswModal.raw?.documento?.header && (() => {
+                    const h = sswModal.raw.documento.header;
+                    const previsao = sswModal.raw?.documento?.tracking?.slice().reverse()
+                      .find((e: any) => e.descricao?.toLowerCase().includes('previsao de entrega'))
+                      ?.descricao?.match(/(\d{2}\/\d{2}\/\d{2,4})/)?.[1];
+                    return (
+                      <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg p-3 mb-4 text-xs space-y-1">
+                        {h.destinatario && <div><span className="text-slate-400">Destinatário:</span> <span className="font-medium text-slate-700 dark:text-slate-300">{h.destinatario}</span></div>}
+                        {previsao && <div><span className="text-slate-400">Previsão de entrega:</span> <span className="font-semibold text-sky-600 dark:text-sky-400">{previsao}</span></div>}
+                        {h.pedido && <div><span className="text-slate-400">Pedido:</span> <span className="font-medium text-slate-700 dark:text-slate-300">{h.pedido}</span></div>}
+                      </div>
+                    );
+                  })()}
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wide font-medium">
+                    {sswModal.events.length} ocorrência{sswModal.events.length !== 1 ? 's' : ''}
+                  </p>
+                  {sswModal.events.map((evt, idx) => {
+                    const isLast = idx === sswModal.events.length - 1;
+                    const ocorrencia = evt.ocorrencia ?? evt.situacao ?? evt.status ?? '';
+                    const descricao = evt.descricao ?? '';
+                    const cidade = evt.cidade ?? evt.local ?? evt.localUnidade ?? '';
+                    const dataHoraRaw = evt.data_hora ?? evt.dataHora ?? evt.data ?? '';
+                    const dataHoraFmt = dataHoraRaw
+                      ? new Date(dataHoraRaw).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : '';
+                    const isEntregue = /entregue|entrega realizada/i.test(ocorrencia);
+                    const isNegativo = evt.tipo === 'Negativo' || /devolvido|recusado|nao entregue/i.test(ocorrencia);
+                    const dotColor = isEntregue ? 'bg-emerald-500' : isNegativo ? 'bg-red-500' : idx === 0 ? 'bg-slate-400 dark:bg-slate-500' : 'bg-sky-500';
+                    return (
+                      <div key={idx} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${dotColor}`} />
+                          {!isLast && <div className="w-0.5 bg-slate-200 dark:bg-slate-700 flex-1 my-1" />}
+                        </div>
+                        <div className={`flex-1 ${isLast ? 'pb-0' : 'pb-4'}`}>
+                          <p className={`font-semibold text-sm ${isEntregue ? 'text-emerald-600 dark:text-emerald-400' : isNegativo ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {ocorrencia}
+                          </p>
+                          {descricao && <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">{descricao}</p>}
+                          <div className="flex items-center gap-2 mt-1">
+                            {cidade && <span className="text-xs text-slate-400 dark:text-slate-500">{cidade}</span>}
+                            {dataHoraFmt && <span className="text-xs text-slate-400 dark:text-slate-500">• {dataHoraFmt}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            {!sswModal.loading && !sswModal.error && sswModal.events.length > 0 && (
+              <div className="p-4 border-t border-slate-200 dark:border-slate-700 shrink-0 flex justify-between items-center">
+                <button
+                  onClick={() => sswModal.invoice && openSSWTracking(sswModal.invoice)}
+                  className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 transition-colors"
+                >
+                  <RotateCw size={14} /> Atualizar
+                </button>
+                <button
+                  onClick={() => sswModal.invoice && trackOnSSWFallback(sswModal.invoice.number)}
+                  className="flex items-center gap-1.5 text-sm text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  <ExternalLink size={14} /> Abrir no SSW
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal Comprovante */}
       {viewingProof && (

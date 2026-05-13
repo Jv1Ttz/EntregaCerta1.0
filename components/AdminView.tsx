@@ -197,6 +197,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   // Modal para finalizar devolução (concluir / cancelar)
   const [modalFinalize, setModalFinalize] = useState<{ open: boolean; invoice: Invoice | null; outcome: 'CONCLUDED' | 'CANCELLED' | null; note: string; loading?: boolean }>({ open: false, invoice: null, outcome: null, note: '', loading: false });
   const [openActionsRow, setOpenActionsRow] = useState<string | null>(null);
+
   const [activeSidebarSection, setActiveSidebarSection] = useState<'main' | 'etiquetas'>('main');
   // Modal de baixa manual (gestor)
   const [manualSettleModal, setManualSettleModal] = useState<{
