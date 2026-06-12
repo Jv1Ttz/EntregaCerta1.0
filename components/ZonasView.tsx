@@ -25,6 +25,42 @@ function centroid(coords: { lat: number; lng: number }[]) {
   };
 }
 
+type LatLng = { lat: number; lng: number };
+
+/** Distância (em graus) de um ponto P ao segmento A→B — projeção limitada ao trecho */
+function distPointToSegment(p: LatLng, a: LatLng, b: LatLng): number {
+  const A = p.lng - a.lng;
+  const B = p.lat - a.lat;
+  const C = b.lng - a.lng;
+  const D = b.lat - a.lat;
+  const lenSq = C * C + D * D;
+  let t = lenSq !== 0 ? (A * C + B * D) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t)); // limita à extensão do segmento
+  const dLng = p.lng - (a.lng + t * C);
+  const dLat = p.lat - (a.lat + t * D);
+  return Math.sqrt(dLng * dLng + dLat * dLat);
+}
+
+/**
+ * Insere um novo ponto na posição mais natural do polígono:
+ * encontra a aresta (incluindo a de fechamento) mais próxima do clique
+ * e coloca o ponto entre os dois vértices dela.
+ */
+function insertOnNearestEdge(points: LatLng[], novo: LatLng): LatLng[] {
+  if (points.length < 2) return [...points, novo];
+  let bestIdx = points.length;
+  let bestDist = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length]; // % fecha o polígono (última→primeira)
+    const d = distPointToSegment(novo, a, b);
+    if (d < bestDist) { bestDist = d; bestIdx = i + 1; }
+  }
+  const next = [...points];
+  next.splice(bestIdx, 0, novo);
+  return next;
+}
+
 interface Props { onBack: () => void; }
 
 export const ZonasView: React.FC<Props> = ({ onBack }) => {
@@ -81,7 +117,7 @@ export const ZonasView: React.FC<Props> = ({ onBack }) => {
       const tooClose = draftPoints.some(p =>
         Math.abs(p.lat - lat) < 0.0008 && Math.abs(p.lng - lng) < 0.0008
       );
-      if (!tooClose) setDraftPoints(prev => [...prev, { lat, lng }]);
+      if (!tooClose) setDraftPoints(prev => insertOnNearestEdge(prev, { lat, lng }));
       return;
     }
 

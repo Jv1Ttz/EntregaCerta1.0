@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
-import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite } from 'lucide-react';
-import Map, { Marker, NavigationControl } from 'react-map-gl';
+import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite, Navigation2 } from 'lucide-react';
+import Map, { Marker, NavigationControl, Source, Layer } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 const MAPBOX_TOKEN = (import.meta.env.VITE_MAPBOX_TOKEN as string) || '';
 
@@ -81,6 +81,9 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [lastFleetSync, setLastFleetSync] = useState<Date | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const mapRef = useRef<any>(null);
+  // Rastreio de nota específica (badge "Em Rota" ou clique no pacote): distância caminhão → entrega
+  const [trackedInvoiceId, setTrackedInvoiceId] = useState<string | null>(null);
+  const [trackedRoute, setTrackedRoute] = useState<{ distanceM: number; durationS: number; durationTypicalS?: number } | null>(null);
 
   // ── dados ──────────────────────────────────────────────────────────────────
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -172,8 +175,16 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     return invoice;
   };
 
-  const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number) => {
-    setSelectedVehicleId(prev => prev === vehicleId ? null : vehicleId);
+  const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number, forceSelect = false) => {
+    const willDeselect = !forceSelect && selectedVehicleId === vehicleId;
+    setSelectedVehicleId(willDeselect ? null : vehicleId);
+    // Encerra o rastreio ao desmarcar ou trocar para veículo diferente do da nota rastreada
+    setTrackedInvoiceId(prev => {
+      if (!prev || willDeselect) return null;
+      const tInv = invoices.find(i => i.id === prev);
+      return tInv?.vehicle_id === vehicleId ? prev : null;
+    });
+    if (willDeselect) return;
     if (lat && lng) mapRef.current?.flyTo({ center: [lng, lat], zoom: 13, duration: 1500 });
     const pending = invoices.filter(i =>
       i.vehicle_id === vehicleId &&
@@ -181,6 +192,51 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     );
     const updated = await Promise.all(pending.map(geocodeInvoice));
     setInvoices(prev => prev.map(inv => updated.find(u => u.id === inv.id) ?? inv));
+  };
+
+  // Nota rastreada e veículo correspondente (derivados do estado atual)
+  const trackedInv = trackedInvoiceId ? invoices.find(i => i.id === trackedInvoiceId) : null;
+  const trackedVeh = trackedInv?.vehicle_id ? vehicles.find(v => v.id === trackedInv.vehicle_id) : null;
+
+  // Rota com trânsito em tempo real (driving-traffic): caminhão → entrega rastreada
+  useEffect(() => {
+    const vLoc = trackedVeh?.last_location;
+    if (activeTab !== 'frota' || !trackedInv?.lat || !trackedInv?.lng || !vLoc) {
+      setTrackedRoute(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+          `${vLoc.lng},${vLoc.lat};${trackedInv.lng},${trackedInv.lat}` +
+          `?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
+        );
+        const data = await res.json();
+        const route = data.routes?.[0];
+        if (!cancelled && route) {
+          setTrackedRoute({
+            distanceM: route.distance ?? 0,
+            durationS: route.duration ?? 0,
+            durationTypicalS: route.duration_typical ?? undefined,
+          });
+        }
+      } catch { /* mantém a última rota calculada */ }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTab, trackedInv?.lat, trackedInv?.lng, trackedVeh?.last_location?.lat, trackedVeh?.last_location?.lng]);
+
+  // Clique no badge "Em Rota": abre a aba frota com o veículo da nota selecionado e rastreado
+  const handleTrackInvoiceVehicle = (inv: Invoice) => {
+    if (!inv.vehicle_id) return;
+    const vehicle = vehicles.find(v => v.id === inv.vehicle_id);
+    setTrackedInvoiceId(inv.id);
+    setActiveTab('frota');
+    // Aguarda a aba e o mapa montarem antes de selecionar/voar até o veículo
+    setTimeout(() => {
+      handleSelectVehicle(inv.vehicle_id!, vehicle?.last_location?.lat, vehicle?.last_location?.lng, true);
+    }, 400);
   };
 
   // Refresh da frota (manual ou automático)
@@ -425,7 +481,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
               <FileText size={15} /> Notas
             </button>
             <button
-              onClick={() => setActiveTab('frota')}
+              onClick={() => { setTrackedInvoiceId(null); setActiveTab('frota'); }}
               className={`flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-all ${activeTab === 'frota' ? 'bg-white dark:bg-slate-600 text-slate-800 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
             >
               <Satellite size={15} /> Frota
@@ -480,7 +536,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   <div
                     key={v.id}
                     onClick={() => {
-                      if (isSelected) { setSelectedVehicleId(null); return; }
+                      if (isSelected) { setSelectedVehicleId(null); setTrackedInvoiceId(null); return; }
                       handleSelectVehicle(v.id, v.last_location?.lat, v.last_location?.lng);
                     }}
                     className={`p-3 rounded-lg border transition-all flex items-center justify-between cursor-pointer
@@ -517,7 +573,82 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
           </div>
 
           {/* Mapa */}
-          <div className="flex-1">
+          <div className="flex-1 relative">
+            {/* Card de rastreio: distância e ETA com trânsito até a entrega */}
+            {trackedInv && (
+              <div className="absolute top-4 left-4 z-10 w-72 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-blue-600 text-white">
+                  <span className="flex items-center gap-2 text-sm font-bold">
+                    <Navigation2 size={15} /> Rastreando entrega
+                  </span>
+                  <button
+                    onClick={() => setTrackedInvoiceId(null)}
+                    title="Parar de rastrear"
+                    className="p-1 rounded-full hover:bg-white/20 transition-colors cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="px-4 py-3 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-slate-400 shrink-0">NF {trackedInv.number}</span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                      {trackedInv.customer_name}
+                    </span>
+                  </div>
+                  {!trackedVeh?.last_location ? (
+                    <p className="text-xs text-orange-500 flex items-center gap-1.5">
+                      <AlertTriangle size={13} /> Veículo sem sinal de GPS
+                    </p>
+                  ) : !trackedInv.lat || !trackedInv.lng ? (
+                    <p className="text-xs text-orange-500 flex items-center gap-1.5">
+                      <AlertTriangle size={13} /> Entrega sem coordenadas no mapa
+                    </p>
+                  ) : trackedRoute ? (() => {
+                    const delayMin = trackedRoute.durationTypicalS
+                      ? Math.round((trackedRoute.durationS - trackedRoute.durationTypicalS) / 60)
+                      : 0;
+                    const ratio = trackedRoute.durationTypicalS
+                      ? trackedRoute.durationS / trackedRoute.durationTypicalS
+                      : 1;
+                    const traffic = ratio < 1.1
+                      ? { label: 'Trânsito fluindo', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400' }
+                      : ratio < 1.35
+                      ? { label: 'Trânsito moderado', dot: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400' }
+                      : { label: 'Trânsito intenso', dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' };
+                    return (
+                      <>
+                        <div className="flex items-center gap-4">
+                          <div>
+                            <p className="text-lg font-black text-blue-600 dark:text-blue-400 leading-tight">
+                              {(trackedRoute.distanceM / 1000).toFixed(1)} km
+                            </p>
+                            <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Distância</p>
+                          </div>
+                          <div>
+                            <p className="text-lg font-black text-slate-700 dark:text-slate-200 leading-tight">
+                              ~{Math.max(1, Math.round(trackedRoute.durationS / 60))} min
+                            </p>
+                            <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Com trânsito agora</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 pt-0.5">
+                          <span className={`w-2 h-2 rounded-full ${traffic.dot} ${ratio >= 1.35 ? 'animate-pulse' : ''}`} />
+                          <span className={`text-[11px] font-bold ${traffic.text}`}>{traffic.label}</span>
+                          {delayMin >= 1 && (
+                            <span className="text-[11px] text-slate-400">· +{delayMin} min de atraso</span>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })() : (
+                    <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                      <Loader2 size={13} className="animate-spin" /> Calculando rota...
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
             <Map
               ref={mapRef}
               initialViewState={{ latitude: -12.9777, longitude: -38.5016, zoom: 11 }}
@@ -541,7 +672,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                     <div
                       className={`flex flex-col items-center cursor-pointer transition-transform duration-300 ${isSelected ? 'scale-125 z-50' : 'scale-100'}`}
                       onClick={() => {
-                        if (isSelected) { setSelectedVehicleId(null); return; }
+                        if (isSelected) { setSelectedVehicleId(null); setTrackedInvoiceId(null); return; }
                         handleSelectVehicle(v.id, v.last_location!.lat, v.last_location!.lng);
                       }}
                     >
@@ -555,6 +686,28 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   </Marker>
                 );
               })}
+
+              {/* Linha reta caminhão → entrega rastreada (distância real vem da Directions API) */}
+              {trackedInv?.lat && trackedInv?.lng && trackedVeh?.last_location && (
+                <Source type="geojson" data={{
+                  type: 'Feature' as const,
+                  geometry: {
+                    type: 'LineString' as const,
+                    coordinates: [
+                      [trackedVeh.last_location.lng, trackedVeh.last_location.lat],
+                      [trackedInv.lng, trackedInv.lat],
+                    ],
+                  },
+                  properties: {},
+                }}>
+                  <Layer type="line" paint={{
+                    'line-color': '#2563eb',
+                    'line-width': 3,
+                    'line-opacity': 0.8,
+                    'line-dasharray': [2, 1.5],
+                  }} />
+                </Source>
+              )}
 
               {/* Pins de notas pendentes do veículo selecionado */}
               {selectedVehicleId && (() => {
@@ -578,7 +731,13 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   const count = group.length;
                   return (
                     <Marker key={`pin-${idx}`} latitude={main.lat!} longitude={main.lng!} anchor="bottom">
-                      <div className="group relative cursor-pointer">
+                      <div
+                        className="group relative cursor-pointer"
+                        onClick={() => setTrackedInvoiceId(prev =>
+                          prev === main.id ? null : main.id
+                        )}
+                        title="Clique para ver a distância do caminhão"
+                      >
                         {/* Pin */}
                         <div className={`relative flex items-center justify-center rounded-full shadow-md border-2 border-white transition-transform hover:scale-110
                           ${count > 1 ? 'bg-purple-600 w-8 h-8' : 'bg-orange-500 w-7 h-7 p-1.5'}`}
@@ -802,10 +961,21 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                         {formatCurrency(inv.value)}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
-                          {STATUS_ICON[inv.status]}
-                          {STATUS_LABEL[inv.status] ?? inv.status}
-                        </span>
+                        {inv.status === DeliveryStatus.IN_PROGRESS && inv.vehicle_id ? (
+                          <button
+                            onClick={() => handleTrackInvoiceVehicle(inv)}
+                            title="Ver veículo no mapa da frota"
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all hover:ring-2 hover:ring-blue-400/60 hover:scale-105 ${STATUS_STYLE[inv.status]}`}
+                          >
+                            <Satellite size={12} />
+                            Em Rota
+                          </button>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
+                            {STATUS_ICON[inv.status]}
+                            {STATUS_LABEL[inv.status] ?? inv.status}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-600 dark:text-slate-300 whitespace-nowrap max-w-[130px] truncate"
                           title={inv.driver_id ? (driverMap[inv.driver_id] ?? '') : ''}>
@@ -871,10 +1041,21 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       {inv.series && <span className="text-slate-400 dark:text-slate-500">/{inv.series}</span>}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
-                        {STATUS_ICON[inv.status]}
-                        {STATUS_LABEL[inv.status] ?? inv.status}
-                      </span>
+                      {inv.status === DeliveryStatus.IN_PROGRESS && inv.vehicle_id ? (
+                        <button
+                          onClick={() => handleTrackInvoiceVehicle(inv)}
+                          title="Ver veículo no mapa da frota"
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold cursor-pointer transition-all hover:ring-2 hover:ring-blue-400/60 ${STATUS_STYLE[inv.status]}`}
+                        >
+                          <Satellite size={12} />
+                          Em Rota
+                        </button>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${STATUS_STYLE[inv.status]}`}>
+                          {STATUS_ICON[inv.status]}
+                          {STATUS_LABEL[inv.status] ?? inv.status}
+                        </span>
+                      )}
                       {/* Rastrear no SSW — somente TRANSPORTADORA */}
                       {driverMap[inv.driver_id ?? '']?.toUpperCase() === 'TRANSPORTADORA' && (
                         <button

@@ -193,6 +193,7 @@ export const db = {
         .select('*')
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false }) // desempate único: estabiliza a paginação e evita notas duplicadas entre lotes
         .range(from, to);
 
       if (error) {
@@ -273,6 +274,22 @@ export const db = {
     }
 
     await db.addLog('SOFT_DELETE', `NF ${inv?.number || invoiceId} excluída${reason ? ` — Motivo: ${reason}` : ''}`);
+  },
+
+  restoreInvoice: async (invoiceId: string) => {
+    const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
+
+    const { error } = await supabase
+      .from('invoices')
+      .update({ deleted_at: null, deleted_by: null, deleted_reason: null })
+      .eq('id', invoiceId);
+
+    if (error) {
+      console.error('Erro ao restaurar invoice:', error);
+      throw error;
+    }
+
+    await db.addLog('STATUS_CHANGE', `NF ${inv?.number || invoiceId} restaurada`);
   },
 
   // Lista de notas excluídas (para tela de auditoria do gestor)

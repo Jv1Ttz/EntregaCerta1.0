@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/db';
 import type { Invoice, ActivityLog, ActivityLogEventType } from '../types';
-import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search } from 'lucide-react';
+import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw } from 'lucide-react';
 
 // ─── Configuração dos tipos de evento ───────────────────────────────────────
 
@@ -24,6 +24,7 @@ const DeletedInvoicesTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -90,25 +91,46 @@ const DeletedInvoicesTab: React.FC = () => {
                 </td>
                 <td className="px-3 py-2 text-[11px] max-w-xs truncate">{inv.deleted_reason || '-'}</td>
                 <td className="px-3 py-2 text-right">
-                  <button
-                    disabled={deletingId === inv.id}
-                    onClick={async () => {
-                      if (!window.confirm('Excluir definitivamente esta nota e seus comprovantes? Esta ação não pode ser desfeita.')) return;
-                      try {
-                        setDeletingId(inv.id);
-                        await db.hardDeleteInvoice(inv.id);
-                        setDeletedInvoices(prev => prev.filter(d => d.id !== inv.id));
-                      } catch (e) {
-                        alert('Erro ao excluir nota definitivamente.');
-                      } finally {
-                        setDeletingId(null);
-                      }
-                    }}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
-                  >
-                    <Trash2 size={12} />
-                    {deletingId === inv.id ? 'Excluindo...' : 'Excluir definitivo'}
-                  </button>
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      disabled={restoringId === inv.id || deletingId === inv.id}
+                      onClick={async () => {
+                        if (!window.confirm(`Restaurar a NF ${inv.number || inv.id}? Ela voltará a aparecer na listagem normal.`)) return;
+                        try {
+                          setRestoringId(inv.id);
+                          await db.restoreInvoice(inv.id);
+                          setDeletedInvoices(prev => prev.filter(d => d.id !== inv.id));
+                        } catch (e) {
+                          alert('Erro ao restaurar nota.');
+                        } finally {
+                          setRestoringId(null);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 disabled:opacity-50"
+                    >
+                      <RotateCcw size={12} />
+                      {restoringId === inv.id ? 'Restaurando...' : 'Restaurar'}
+                    </button>
+                    <button
+                      disabled={deletingId === inv.id || restoringId === inv.id}
+                      onClick={async () => {
+                        if (!window.confirm('Excluir definitivamente esta nota e seus comprovantes? Esta ação não pode ser desfeita.')) return;
+                        try {
+                          setDeletingId(inv.id);
+                          await db.hardDeleteInvoice(inv.id);
+                          setDeletedInvoices(prev => prev.filter(d => d.id !== inv.id));
+                        } catch (e) {
+                          alert('Erro ao excluir nota definitivamente.');
+                        } finally {
+                          setDeletingId(null);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
+                    >
+                      <Trash2 size={12} />
+                      {deletingId === inv.id ? 'Excluindo...' : 'Excluir definitivo'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

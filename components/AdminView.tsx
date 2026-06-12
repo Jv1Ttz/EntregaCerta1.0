@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 import { LabelsView } from './LabelsView';
@@ -101,9 +101,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  // Rastreio de nota específica (clique no badge "Em Rota"): rota caminhão → entrega
+  const [trackedInvoiceId, setTrackedInvoiceId] = useState<string | null>(null);
+  const [trackedRoute, setTrackedRoute] = useState<{ coords: number[][]; distanceM: number; durationS: number; durationTypicalS?: number } | null>(null);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<Set<string>>(new Set());
+  // Paginação da tabela de gestão (filtros/busca continuam atuando sobre a lista completa)
+  const [tablePage, setTablePage] = useState(1);
+  const [tablePageSize, setTablePageSize] = useState(25);
   const [bulkDriver, setBulkDriver] = useState<string>("");
   const [bulkVehicle, setBulkVehicle] = useState<string>("");
   
@@ -197,6 +203,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   // Modal para finalizar devolução (concluir / cancelar)
   const [modalFinalize, setModalFinalize] = useState<{ open: boolean; invoice: Invoice | null; outcome: 'CONCLUDED' | 'CANCELLED' | null; note: string; loading?: boolean }>({ open: false, invoice: null, outcome: null, note: '', loading: false });
   const [openActionsRow, setOpenActionsRow] = useState<string | null>(null);
+
+  // Modal de rastreamento SSW inline
+  const [sswModal, setSswModal] = useState<{
+    open: boolean;
+    invoice: Invoice | null;
+    loading: boolean;
+    events: Array<{ data_hora?: string; cidade?: string; ocorrencia?: string; descricao?: string; tipo?: string; [key: string]: any }>;
+    raw: any;
+    error: string | null;
+  }>({ open: false, invoice: null, loading: false, events: [], raw: null, error: null });
 
   const [activeSidebarSection, setActiveSidebarSection] = useState<'main' | 'etiquetas'>('main');
   // Modal de baixa manual (gestor)
@@ -506,6 +522,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   // 2b. Ação de Clique no Veículo — geocodifica notas por vehicle_id
   const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number) => {
     setSelectedVehicleId(vehicleId);
+    // Se trocou para um veículo diferente do da nota rastreada, encerra o rastreio
+    setTrackedInvoiceId(prev => {
+      if (!prev) return prev;
+      const tInv = invoices.find(i => i.id === prev);
+      return tInv?.vehicle_id === vehicleId ? prev : null;
+    });
     if (lat && lng) {
       mapRef.current?.flyTo({ center: [lng, lat], zoom: 13, duration: 2000 });
     }
@@ -521,6 +543,69 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   };
 
   // --- FIM DO BLOCO ---
+
+  // Nota rastreada e veículo correspondente (derivados do estado atual)
+  const trackedInv = trackedInvoiceId ? invoices.find(i => i.id === trackedInvoiceId) : null;
+  const trackedVeh = trackedInv?.vehicle_id ? vehicles.find(v => v.id === trackedInv.vehicle_id) : null;
+
+  // Busca a rota pelas ruas (caminhão → entrega rastreada) e atualiza quando o GPS se move
+  useEffect(() => {
+    const vLoc = trackedVeh?.last_location;
+    if (!showFleetMonitor || !trackedInv?.lat || !trackedInv?.lng || !vLoc) {
+      setTrackedRoute(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Perfil "driving-traffic": ETA considera o trânsito em tempo real.
+        // duration_typical = tempo sem trânsito, permite medir o atraso atual.
+        const res = await fetch(
+          `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+          `${vLoc.lng},${vLoc.lat};${trackedInv.lng},${trackedInv.lat}` +
+          `?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`
+        );
+        const data = await res.json();
+        const route = data.routes?.[0];
+        if (!cancelled && route) {
+          setTrackedRoute({
+            coords: route.geometry?.coordinates ?? [],
+            distanceM: route.distance ?? 0,
+            durationS: route.duration ?? 0,
+            durationTypicalS: route.duration_typical ?? undefined,
+          });
+        }
+      } catch { /* mantém a última rota calculada */ }
+    })();
+    return () => { cancelled = true; };
+  }, [showFleetMonitor, trackedInv?.lat, trackedInv?.lng, trackedVeh?.last_location?.lat, trackedVeh?.last_location?.lng]);
+
+  // Atualiza as posições GPS dos veículos enquanto o monitor de frota está aberto
+  // (query leve — só a tabela vehicles, sem baixar as notas)
+  useEffect(() => {
+    if (!showFleetMonitor) return;
+    const syncFleet = async () => {
+      try {
+        const veh = await db.getVehicles();
+        setVehicles(veh);
+      } catch { /* mantém as posições atuais em caso de erro */ }
+    };
+    syncFleet(); // sincroniza imediatamente ao abrir o modal
+    const interval = setInterval(syncFleet, 20_000);
+    return () => clearInterval(interval);
+  }, [showFleetMonitor]);
+
+  // Abre o monitor de frota já com o veículo da nota selecionado (clique no badge "Em Rota")
+  const handleTrackInvoiceVehicle = (inv: Invoice) => {
+    if (!inv.vehicle_id) return;
+    const vehicle = vehicles.find(v => v.id === inv.vehicle_id);
+    setShowFleetMonitor(true);
+    setTrackedInvoiceId(inv.id);
+    // Aguarda o modal e o mapa montarem antes de selecionar/voar até o veículo
+    setTimeout(() => {
+      handleSelectVehicle(inv.vehicle_id!, vehicle?.last_location?.lat, vehicle?.last_location?.lng);
+    }, 500);
+  };
 
   // --- FUNÇÃO QUE EXECUTA A EXCLUSÃO REAL ---
   const handleConfirmDelete = async () => {
@@ -960,6 +1045,18 @@ const sortedInvoices = useMemo(() => {
   return items;
 }, [filteredInvoices, sortConfig, drivers, vehicles]);
 
+// Volta para a página 1 sempre que filtros, busca ou ordenação mudam
+useEffect(() => {
+  setTablePage(1);
+}, [searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate, sortConfig, tablePageSize]);
+
+// Apenas a EXIBIÇÃO é fatiada — filtros/busca/seleção atuam sobre a lista completa
+const totalTablePages = Math.max(1, Math.ceil(sortedInvoices.length / tablePageSize));
+const paginatedInvoices = useMemo(() => {
+  const start = (tablePage - 1) * tablePageSize;
+  return sortedInvoices.slice(start, start + tablePageSize);
+}, [sortedInvoices, tablePage, tablePageSize]);
+
 const requestSort = (key: string, _event: React.MouseEvent) => {
   setSortConfig(prev => {
     const existing = prev.find(s => s.key === key);
@@ -1095,7 +1192,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     }]);
   };
 
-  /** Abre rastreamento SSW em nova aba com CNPJ e NF pré-preenchidos */
+  /** Abre rastreamento SSW em nova aba (fallback) */
   const trackOnSSW = (invoiceNumber: string) => {
     const form = document.createElement('form');
     form.action = 'https://ssw.inf.br/2/ssw_resultSSW';
@@ -1112,6 +1209,25 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     document.body.appendChild(form);
     form.submit();
     document.body.removeChild(form);
+  };
+
+  /** Busca rastreamento SSW via API e abre modal inline */
+  const openSSWTracking = async (inv: Invoice) => {
+    setSswModal({ open: true, invoice: inv, loading: true, events: [], raw: null, error: null });
+    try {
+      const res = await fetch('https://ssw.inf.br/api/trackingdanfe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chave_nfe: inv.access_key }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const events = data?.documento?.tracking ?? data?.rastreamento ?? data?.ocorrencias ?? (Array.isArray(data) ? data : []);
+      setSswModal(prev => ({ ...prev, loading: false, events, raw: data }));
+    } catch (err: any) {
+      const isCors = err instanceof TypeError || err?.message?.includes('Failed to fetch');
+      setSswModal(prev => ({ ...prev, loading: false, error: isCors ? 'CORS_BLOCKED' : (err?.message || 'Erro desconhecido') }));
+    }
   };
 
   const handleDeleteInvoice = (id: string) => {
@@ -1528,6 +1644,19 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       [DeliveryStatus.RETURNED]: 'Devolvido',
       [DeliveryStatus.ISSUE]: 'Pendência',
     };
+    // "Em Rota" com veículo atribuído: badge clicável que abre a frota no caminhão da nota
+    if (status === DeliveryStatus.IN_PROGRESS && inv.vehicle_id) {
+      return (
+        <button
+          onClick={() => handleTrackInvoiceVehicle(inv)}
+          title="Ver veículo no mapa da frota"
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-2 py-1 rounded-full text-sm font-bold border cursor-pointer transition-all hover:ring-2 hover:ring-blue-400/60 hover:scale-105 ${styles[status]}`}
+        >
+          <Satellite size={13} />
+          Em Rota
+        </button>
+      );
+    }
     return (
       <span className={`inline-flex items-center whitespace-nowrap px-2 py-1 rounded-full text-sm font-bold border ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
         {labels[status] || status}
@@ -1630,7 +1759,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           </div> 
           
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
-            <button onClick={() => setShowFleetMonitor(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md transition-colors shadow-sm animate-pulse">
+            <button onClick={() => { setTrackedInvoiceId(null); setShowFleetMonitor(true); }} className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md transition-colors shadow-sm animate-pulse">
               <Satellite className="h-4 w-4" /> <span className="font-medium text-sm">Monitorar Frota</span>
             </button>
             
@@ -2097,7 +2226,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                      </td>
                    </tr>
                 ) : (
-                  sortedInvoices.map((inv) => (
+                  paginatedInvoices.map((inv) => (
                     <tr key={inv.id} className={`bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
                       <td className="px-6 py-4">
                         <button onClick={() => toggleSelectOne(inv.id)} className="flex items-center justify-center text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">
@@ -2333,7 +2462,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                 {/* Rastrear no SSW — somente para TRANSPORTADORA */}
                                 {drivers.find(d => d.id === inv.driver_id)?.name?.toUpperCase() === 'TRANSPORTADORA' && (
                                   <button
-                                    onClick={() => { trackOnSSW(inv.number); setOpenActionsRow(null); }}
+                                    onClick={() => { openSSWTracking(inv); setOpenActionsRow(null); }}
                                     className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-50 dark:hover:bg-sky-900/40 text-sky-600 dark:text-sky-300"
                                   >
                                     <ExternalLink size={16} />
@@ -2360,6 +2489,50 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </tbody>
             </table>
           </div>
+
+          {/* Paginação — exibição fatiada; filtros e busca atuam sobre todas as notas */}
+          {sortedInvoices.length > 0 && (
+            <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-800 rounded-b-lg">
+              <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs">
+                <span>
+                  {Math.min((tablePage - 1) * tablePageSize + 1, sortedInvoices.length)}–{Math.min(tablePage * tablePageSize, sortedInvoices.length)} de {sortedInvoices.length}
+                </span>
+                <select
+                  value={tablePageSize}
+                  onChange={e => setTablePageSize(Number(e.target.value))}
+                  className="ml-2 px-2 py-1 rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value={25}>25 / página</option>
+                  <option value={50}>50 / página</option>
+                  <option value={100}>100 / página</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setTablePage(1)} disabled={tablePage === 1}
+                  className="px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">«</button>
+                <button onClick={() => setTablePage(p => Math.max(1, p - 1))} disabled={tablePage === 1}
+                  className="p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">
+                  <ChevronLeft size={16} /></button>
+                {Array.from({ length: totalTablePages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalTablePages || Math.abs(p - tablePage) <= 1)
+                  .reduce<(number | '...')[]>((acc, p, i, arr) => {
+                    if (i > 0 && typeof arr[i - 1] === 'number' && (p as number) - (arr[i - 1] as number) > 1) acc.push('...');
+                    acc.push(p); return acc;
+                  }, [])
+                  .map((item, i) => item === '...'
+                    ? <span key={`e${i}`} className="px-1 text-slate-400">…</span>
+                    : <button key={item} onClick={() => setTablePage(item as number)}
+                        className={`min-w-[28px] px-2 py-1 rounded text-xs font-medium ${tablePage === item ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
+                      >{item}</button>
+                  )}
+                <button onClick={() => setTablePage(p => Math.min(totalTablePages, p + 1))} disabled={tablePage === totalTablePages}
+                  className="p-1 rounded text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">
+                  <ChevronRight size={16} /></button>
+                <button onClick={() => setTablePage(totalTablePages)} disabled={tablePage === totalTablePages}
+                  className="px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed">»</button>
+              </div>
+            </div>
+          )}
         </div>
 
         </>)} {/* fim do bloco activeSidebarSection === 'main' */}
@@ -2373,6 +2546,128 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
              <Loader2 className="h-10 w-10 text-blue-600 animate-spin mb-4" />
              <h3 className="text-lg font-bold dark:text-white">Consultando SEFAZ...</h3>
              <p className="text-sm text-gray-500">Buscando dados da chave...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Rastreamento SSW */}
+      {sswModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 bg-sky-600 dark:bg-sky-700 text-white flex justify-between items-center shrink-0">
+              <div>
+                <h3 className="font-bold flex items-center gap-2 text-lg"><ExternalLink size={20} /> Rastreamento SSW</h3>
+                {sswModal.invoice && <p className="text-sky-100 text-sm mt-0.5">NF {sswModal.invoice.number} • {sswModal.invoice.customer_name}</p>}
+              </div>
+              <button onClick={() => setSswModal(prev => ({ ...prev, open: false }))} className="hover:bg-white/20 rounded-full p-1.5 transition-colors"><X size={20} /></button>
+            </div>
+
+            <div className="overflow-y-auto p-5 flex-1">
+              {sswModal.loading && (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="animate-spin text-sky-500" size={36} />
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Consultando SSW...</p>
+                </div>
+              )}
+
+              {!sswModal.loading && sswModal.error === 'CORS_BLOCKED' && (
+                <div className="flex flex-col items-center gap-4 py-8 text-center">
+                  <div className="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded-xl p-5 w-full">
+                    <AlertTriangle className="text-amber-500 mx-auto mb-2" size={32} />
+                    <p className="font-semibold text-amber-800 dark:text-amber-200">API bloqueada pelo navegador (CORS)</p>
+                    <p className="text-amber-700 dark:text-amber-300 text-sm mt-1">Clique abaixo para abrir o rastreamento no site SSW.</p>
+                  </div>
+                  <button onClick={() => sswModal.invoice && trackOnSSW(sswModal.invoice.number)} className="flex items-center gap-2 px-5 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-medium transition-colors">
+                    <ExternalLink size={16} /> Abrir no site SSW
+                  </button>
+                </div>
+              )}
+
+              {!sswModal.loading && sswModal.error && sswModal.error !== 'CORS_BLOCKED' && (
+                <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-xl p-5 text-center">
+                  <AlertOctagon className="text-red-500 mx-auto mb-2" size={28} />
+                  <p className="font-semibold text-red-700 dark:text-red-300">Erro ao consultar SSW</p>
+                  <p className="text-red-600 dark:text-red-400 text-xs mt-1 font-mono">{sswModal.error}</p>
+                  <button onClick={() => sswModal.invoice && trackOnSSW(sswModal.invoice.number)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-sm mx-auto transition-colors">
+                    <ExternalLink size={14} /> Abrir no site SSW
+                  </button>
+                </div>
+              )}
+
+              {!sswModal.loading && !sswModal.error && sswModal.events.length === 0 && sswModal.raw !== null && (
+                <div className="text-center py-10">
+                  <Package className="mx-auto text-slate-300 dark:text-slate-600 mb-3" size={40} />
+                  <p className="text-slate-500 dark:text-slate-400 font-medium">Nenhuma ocorrência encontrada</p>
+                  <p className="text-slate-400 dark:text-slate-500 text-sm mt-1">A SSW ainda não registrou eventos para esta NF.</p>
+                  <button onClick={() => sswModal.invoice && trackOnSSW(sswModal.invoice.number)} className="mt-4 inline-flex items-center gap-2 px-4 py-2 border border-sky-500 text-sky-600 dark:text-sky-400 rounded-lg text-sm hover:bg-sky-50 dark:hover:bg-sky-900/30 transition-colors">
+                    <ExternalLink size={14} /> Ver no site SSW
+                  </button>
+                </div>
+              )}
+
+              {!sswModal.loading && !sswModal.error && sswModal.events.length > 0 && (
+                <div>
+                  {sswModal.raw?.documento?.header && (() => {
+                    const h = sswModal.raw.documento.header;
+                    const previsao = sswModal.raw?.documento?.tracking?.slice().reverse()
+                      .find((e: any) => e.descricao?.toLowerCase().includes('previsao de entrega'))
+                      ?.descricao?.match(/(\d{2}\/\d{2}\/\d{2,4})/)?.[1];
+                    return (
+                      <div className="bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg p-3 mb-4 text-xs space-y-1">
+                        {h.destinatario && <div><span className="text-slate-400">Destinatário:</span> <span className="font-medium text-slate-700 dark:text-slate-300">{h.destinatario}</span></div>}
+                        {previsao && <div><span className="text-slate-400">Previsão de entrega:</span> <span className="font-semibold text-sky-600 dark:text-sky-400">{previsao}</span></div>}
+                        {h.pedido && <div><span className="text-slate-400">Pedido:</span> <span className="font-medium text-slate-700 dark:text-slate-300">{h.pedido}</span></div>}
+                      </div>
+                    );
+                  })()}
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mb-4 uppercase tracking-wide font-medium">
+                    {sswModal.events.length} ocorrência{sswModal.events.length !== 1 ? 's' : ''}
+                  </p>
+                  {sswModal.events.map((evt, idx) => {
+                    const isLast = idx === sswModal.events.length - 1;
+                    const ocorrencia = evt.ocorrencia ?? evt.situacao ?? evt.status ?? '';
+                    const descricao = evt.descricao ?? '';
+                    const cidade = evt.cidade ?? evt.local ?? evt.localUnidade ?? '';
+                    const dataHoraRaw = evt.data_hora ?? evt.dataHora ?? evt.data ?? '';
+                    const dataHoraFmt = dataHoraRaw
+                      ? new Date(dataHoraRaw).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : '';
+                    const isEntregue = /entregue|entrega realizada/i.test(ocorrencia);
+                    const isNegativo = evt.tipo === 'Negativo' || /devolvido|recusado|nao entregue/i.test(ocorrencia);
+                    const dotColor = isEntregue ? 'bg-emerald-500' : isNegativo ? 'bg-red-500' : idx === 0 ? 'bg-slate-400 dark:bg-slate-500' : 'bg-sky-500';
+                    return (
+                      <div key={idx} className="flex gap-3">
+                        <div className="flex flex-col items-center">
+                          <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${dotColor}`} />
+                          {!isLast && <div className="w-0.5 bg-slate-200 dark:bg-slate-700 flex-1 my-1" />}
+                        </div>
+                        <div className={`flex-1 ${isLast ? 'pb-0' : 'pb-4'}`}>
+                          <p className={`font-semibold text-sm ${isEntregue ? 'text-emerald-600 dark:text-emerald-400' : isNegativo ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {ocorrencia}
+                          </p>
+                          {descricao && <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed">{descricao}</p>}
+                          <div className="flex items-center gap-2 mt-1">
+                            {cidade && <span className="text-xs text-slate-400 dark:text-slate-500">{cidade}</span>}
+                            {dataHoraFmt && <span className="text-xs text-slate-400 dark:text-slate-500">• {dataHoraFmt}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {!sswModal.loading && !sswModal.error && sswModal.events.length > 0 && (
+              <div className="p-4 border-t border-slate-200 dark:border-slate-700 shrink-0 flex justify-between items-center">
+                <button onClick={() => sswModal.invoice && openSSWTracking(sswModal.invoice)} className="flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 transition-colors">
+                  <RefreshCw size={14} /> Atualizar
+                </button>
+                <button onClick={() => sswModal.invoice && trackOnSSW(sswModal.invoice.number)} className="flex items-center gap-1.5 text-sm text-sky-600 dark:text-sky-400 hover:underline">
+                  <ExternalLink size={14} /> Abrir no SSW
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2921,12 +3216,89 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
               {/* --- MAPA --- */}
               <div className="flex-1 relative bg-slate-100">
-                <button 
-                  onClick={() => setShowFleetMonitor(false)} 
+                <button
+                  onClick={() => { setShowFleetMonitor(false); setTrackedInvoiceId(null); }}
                   className="absolute top-4 right-4 z-10 bg-white dark:bg-slate-900 p-2 rounded-full shadow-lg hover:bg-red-50 text-slate-500 hover:text-red-500 transition-colors border border-slate-200 dark:border-slate-700"
                 >
                   <X size={20} />
                 </button>
+
+                {/* Card de rastreio: distância e tempo do caminhão até a entrega */}
+                {trackedInv && (
+                  <div className="absolute top-4 left-4 z-10 w-72 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-blue-600 text-white">
+                      <span className="flex items-center gap-2 text-sm font-bold">
+                        <Navigation2 size={15} /> Rastreando entrega
+                      </span>
+                      <button
+                        onClick={() => setTrackedInvoiceId(null)}
+                        title="Parar de rastrear"
+                        className="p-1 rounded-full hover:bg-white/20 transition-colors cursor-pointer"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <div className="px-4 py-3 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-mono text-slate-400 shrink-0">NF {trackedInv.number}</span>
+                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
+                          {trackedInv.customer_name}
+                        </span>
+                      </div>
+                      {!trackedVeh?.last_location ? (
+                        <p className="text-xs text-orange-500 flex items-center gap-1.5">
+                          <AlertTriangle size={13} /> Veículo sem sinal de GPS
+                        </p>
+                      ) : !trackedInv.lat || !trackedInv.lng ? (
+                        <p className="text-xs text-orange-500 flex items-center gap-1.5">
+                          <AlertTriangle size={13} /> Entrega sem coordenadas no mapa
+                        </p>
+                      ) : trackedRoute ? (() => {
+                        // Compara ETA com trânsito vs. tempo típico para classificar a via
+                        const delayMin = trackedRoute.durationTypicalS
+                          ? Math.round((trackedRoute.durationS - trackedRoute.durationTypicalS) / 60)
+                          : 0;
+                        const ratio = trackedRoute.durationTypicalS
+                          ? trackedRoute.durationS / trackedRoute.durationTypicalS
+                          : 1;
+                        const traffic = ratio < 1.1
+                          ? { label: 'Trânsito fluindo', dot: 'bg-green-500', text: 'text-green-600 dark:text-green-400' }
+                          : ratio < 1.35
+                          ? { label: 'Trânsito moderado', dot: 'bg-orange-500', text: 'text-orange-600 dark:text-orange-400' }
+                          : { label: 'Trânsito intenso', dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' };
+                        return (
+                          <>
+                            <div className="flex items-center gap-4">
+                              <div>
+                                <p className="text-lg font-black text-blue-600 dark:text-blue-400 leading-tight">
+                                  {(trackedRoute.distanceM / 1000).toFixed(1)} km
+                                </p>
+                                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Distância</p>
+                              </div>
+                              <div>
+                                <p className="text-lg font-black text-slate-700 dark:text-slate-200 leading-tight">
+                                  ~{Math.max(1, Math.round(trackedRoute.durationS / 60))} min
+                                </p>
+                                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Com trânsito agora</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 pt-0.5">
+                              <span className={`w-2 h-2 rounded-full ${traffic.dot} ${ratio >= 1.35 ? 'animate-pulse' : ''}`} />
+                              <span className={`text-[11px] font-bold ${traffic.text}`}>{traffic.label}</span>
+                              {delayMin >= 1 && (
+                                <span className="text-[11px] text-slate-400">· +{delayMin} min de atraso</span>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })() : (
+                        <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                          <Loader2 size={13} className="animate-spin" /> Calculando rota...
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <Map
                     ref={mapRef}
@@ -2967,6 +3339,28 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         )
                     })}
 
+                    {/* 1b. LINHA RETA CAMINHÃO → ENTREGA RASTREADA (distância real vem da Directions API) */}
+                    {trackedInv?.lat && trackedInv?.lng && trackedVeh?.last_location && (
+                        <Source type="geojson" data={{
+                            type: 'Feature' as const,
+                            geometry: {
+                                type: 'LineString' as const,
+                                coordinates: [
+                                    [trackedVeh.last_location.lng, trackedVeh.last_location.lat],
+                                    [trackedInv.lng, trackedInv.lat],
+                                ],
+                            },
+                            properties: {},
+                        }}>
+                            <Layer type="line" paint={{
+                                'line-color': '#2563eb',
+                                'line-width': 3,
+                                'line-opacity': 0.8,
+                                'line-dasharray': [2, 1.5],
+                            }} />
+                        </Source>
+                    )}
+
                     {/* 2. RENDERIZA AS ENTREGAS (AGRUPADAS POR LOCAL) */}
                     {(() => {
                         // 1. Agrupa notas pela coordenada (Lat,Lng)
@@ -2999,7 +3393,13 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                     longitude={mainInvoice.lng!}
                                     anchor="bottom"
                                 >
-                                    <div className="group relative cursor-pointer z-50">
+                                    <div
+                                        className="group relative cursor-pointer z-50"
+                                        onClick={() => setTrackedInvoiceId(prev =>
+                                            prev === mainInvoice.id ? null : mainInvoice.id
+                                        )}
+                                        title="Clique para ver a distância do caminhão"
+                                    >
                                         {/* Ícone do Pacote */}
                                         <div className={`
                                             relative flex items-center justify-center rounded-full shadow-md border-2 border-white transition-transform hover:scale-110
