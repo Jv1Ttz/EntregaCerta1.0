@@ -1658,7 +1658,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       );
     }
     return (
-      <span className={`inline-flex items-center whitespace-nowrap px-2 py-1 rounded-full text-sm font-bold border ${styles[status] || 'bg-gray-100 text-gray-800'}`}>
+      <span className={`inline-flex items-center whitespace-nowrap px-2 py-1 rounded-full text-sm font-bold border ${styles[status] || 'bg-slate-100 text-slate-800'}`}>
         {labels[status] || status}
       </span>
     );
@@ -1673,7 +1673,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Truck className="h-6 w-6 text-blue-400" />
-            <h1 className="text-xl font-bold tracking-tight">EntregaCerta <span className="text-slate-400 font-normal">| Gestão</span></h1>
+            <h1 className="text-xl font-bold tracking-tight">EntregaCerta <span className="text-slate-500 dark:text-slate-400 font-normal">| Gestão</span></h1>
           </div>
           <div className="flex items-center gap-4">
             {/* --- NOVO BOTÃO DE TEMA AQUI --- */}
@@ -1759,7 +1759,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           </div> 
           
           <div className="flex flex-wrap gap-2 w-full md:w-auto">
-            <button onClick={() => { setTrackedInvoiceId(null); setShowFleetMonitor(true); }} className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md transition-colors shadow-sm animate-pulse">
+            <button onClick={() => { setTrackedInvoiceId(null); setShowFleetMonitor(true); }} className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md transition-colors shadow-sm">
               <Satellite className="h-4 w-4" /> <span className="font-medium text-sm">Monitorar Frota</span>
             </button>
             
@@ -1816,9 +1816,9 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
             </div>
 
             {/* Campos de Data */}
-            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-2 px-2 border-r border-slate-200 dark:border-slate-700">
-                   <Clock size={14} className="text-slate-400"/>
+                   <Clock size={14} className="text-slate-500 dark:text-slate-400"/>
                    <span className="text-xs font-bold text-slate-500 uppercase">Período</span>
                 </div>
                 <input 
@@ -1827,7 +1827,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     value={dashStartDate}
                     onChange={(e) => setDashStartDate(e.target.value)}
                 />
-                <span className="text-slate-400">-</span>
+                <span className="text-slate-500 dark:text-slate-400">-</span>
                 <input 
                     type="date" 
                     className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:text-white cursor-pointer"
@@ -1883,7 +1883,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                <h3 className="text-3xl font-black text-slate-800 dark:text-white mt-2 tracking-tight">
                  {totalDeliveredValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                </h3>
-               <p className="text-xs text-slate-400 mt-1">Soma das notas baixadas no período.</p>
+               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Soma das notas baixadas no período.</p>
              </div>
           </div>
 
@@ -1899,7 +1899,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                <h3 className="text-3xl font-black text-slate-800 dark:text-white mt-2 tracking-tight">
                  {totalFailedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                </h3>
-               <p className="text-xs text-slate-400 mt-1">Soma das falhas no período.</p>
+               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Soma das falhas no período.</p>
              </div>
           </div>
 
@@ -1914,7 +1914,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
              
              <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-600">
                {driverRanking.length === 0 ? (
-                 <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm italic opacity-60">
+                 <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 text-sm italic opacity-60">
                     <User size={24} className="mb-1"/>
                     <p>Sem dados no período</p>
                  </div>
@@ -1937,7 +1937,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                          </p>
                        </div>
                      </div>
-                     <span className="text-[10px] font-mono text-slate-400 bg-slate-50 dark:bg-slate-700/50 px-2 py-1 rounded">
+                     <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-700/50 px-2 py-1 rounded">
                        {driver.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                      </span>
                    </div>
@@ -2022,7 +2022,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                
                {/* 1. Busca Texto (1 Coluna) */}
                <div className="relative col-span-2 md:col-span-2 xl:col-span-1">
-                 <Search className="absolute left-3 top-2.5 text-slate-400 h-4 w-4" />
+                 <Search className="absolute left-3 top-2.5 text-slate-500 dark:text-slate-400 h-4 w-4" />
                  <input 
                    type="text" 
                    placeholder="Buscar..." 
@@ -2076,9 +2076,9 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
                {/* 5. Filtro Data EMISSÃO (2 Colunas - Cinza) */}
                {/* Visualmente agrupado com borda e fundo cinza para destacar */}
-               <div className="flex gap-2 items-center col-span-2 md:col-span-2 xl:col-span-2 bg-slate-50 dark:bg-slate-900/50 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+               <div className="flex gap-2 items-center col-span-2 md:col-span-2 xl:col-span-2 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
                  <div className="relative flex-1 min-w-0">
-                    <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-800 px-1 text-[10px] text-slate-400 font-bold z-10 uppercase">Emissão De</span>
+                    <span className="absolute -top-2 left-2 bg-slate-100 dark:bg-slate-800 px-1 text-[10px] text-slate-500 dark:text-slate-400 font-bold z-10 uppercase">Emissão De</span>
                     <input 
                       type="date"
                       className="w-full p-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
@@ -2088,7 +2088,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  </div>
                  
                  <div className="relative flex-1 min-w-0">
-                    <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-800 px-1 text-[10px] text-slate-400 font-bold z-10 uppercase">Até</span>
+                    <span className="absolute -top-2 left-2 bg-slate-100 dark:bg-slate-800 px-1 text-[10px] text-slate-500 dark:text-slate-400 font-bold z-10 uppercase">Até</span>
                     <input 
                       type="date"
                       className="w-full p-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
@@ -2220,7 +2220,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
                 {sortedInvoices.length === 0 ? (
                    <tr>
-                     <td colSpan={7} className="px-6 py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2 w-full">
+                     <td colSpan={7} className="px-6 py-12 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center justify-center gap-2 w-full">
                        <Search size={32} className="opacity-20 mb-2"/>
                        <p>Nenhuma nota encontrada com os filtros atuais.</p>
                      </td>
@@ -2229,7 +2229,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   paginatedInvoices.map((inv) => (
                     <tr key={inv.id} className={`bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
                       <td className="px-6 py-4">
-                        <button onClick={() => toggleSelectOne(inv.id)} className="flex items-center justify-center text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">
+                        <button onClick={() => toggleSelectOne(inv.id)} className="flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">
                           {selectedInvoiceIds.has(inv.id) ? <CheckSquare size={18} className="text-blue-600 dark:text-blue-400"/> : <Square size={18}/>}
                         </button>
                       </td>
@@ -2289,7 +2289,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
 
         {/* Data de Emissão */}
-        <div className="text-[10px] text-slate-400 mt-0.5">
+        <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
             {new Date(inv.created_at).toLocaleDateString('pt-BR')}
         </div>
     </div>
@@ -2307,7 +2307,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                           {inv.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
                         {inv.original_value && inv.original_value !== inv.value && (
-                          <span className="block text-[10px] text-slate-400 line-through">
+                          <span className="block text-[10px] text-slate-500 dark:text-slate-400 line-through">
                             {inv.original_value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                           </span>
                         )}
@@ -2322,13 +2322,13 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                     {new Date(inv.delivered_at).toLocaleDateString('pt-BR')}
                                 </span>
                                 {/* HORA (Menorzinha) */}
-                                <span className="text-[10px] text-slate-400 font-mono">
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">
                                     {new Date(inv.delivered_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
                                 </span>
                             </div>
                         ) : (
                             // Se não tiver data (Pendente ou Em Rota)
-                            <span className="text-xs text-slate-400 opacity-50">--</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 opacity-50">--</span>
                         )}
                       </td>
                       {/* 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆 */}
@@ -2520,7 +2520,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     acc.push(p); return acc;
                   }, [])
                   .map((item, i) => item === '...'
-                    ? <span key={`e${i}`} className="px-1 text-slate-400">…</span>
+                    ? <span key={`e${i}`} className="px-1 text-slate-500 dark:text-slate-400">…</span>
                     : <button key={item} onClick={() => setTablePage(item as number)}
                         className={`min-w-[28px] px-2 py-1 rounded text-xs font-medium ${tablePage === item ? 'bg-blue-600 text-white' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'}`}
                       >{item}</button>
@@ -2545,7 +2545,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-xl flex flex-col items-center">
              <Loader2 className="h-10 w-10 text-blue-600 animate-spin mb-4" />
              <h3 className="text-lg font-bold dark:text-white">Consultando SEFAZ...</h3>
-             <p className="text-sm text-gray-500">Buscando dados da chave...</p>
+             <p className="text-sm text-slate-500 dark:text-slate-400">Buscando dados da chave...</p>
           </div>
         </div>
       )}
@@ -2743,19 +2743,19 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   <div>
                     <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Assinatura</h4>
                     <div className="border rounded-lg bg-white p-2 h-40 flex items-center justify-center">
-                      {viewingProof.proof.signature_data ? <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" /> : <span className="text-slate-400 italic">Não disponível</span>}
+                      {viewingProof.proof.signature_data ? <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" /> : <span className="text-slate-500 dark:text-slate-400 italic">Não disponível</span>}
                     </div>
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Foto / Evidência</h4>
                     <div className="border rounded-lg bg-slate-50 h-40 flex items-center justify-center">
-                      {viewingProof.proof.photo_url ? <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" /> : <span className="text-slate-400 italic">Não disponível</span>}
+                      {viewingProof.proof.photo_url ? <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" /> : <span className="text-slate-500 dark:text-slate-400 italic">Não disponível</span>}
                     </div>
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm mb-3">Canhoto</h4>
                     <div className="border rounded-lg bg-slate-50 h-40 flex items-center justify-center">
-                      {viewingProof.proof.photo_stub_url ? <img src={viewingProof.proof.photo_stub_url} alt="Canhoto" className="w-full h-full object-cover" /> : <span className="text-slate-400 italic">Não disponível</span>}
+                      {viewingProof.proof.photo_stub_url ? <img src={viewingProof.proof.photo_stub_url} alt="Canhoto" className="w-full h-full object-cover" /> : <span className="text-slate-500 dark:text-slate-400 italic">Não disponível</span>}
                     </div>
                   </div>
                 </div>
@@ -2783,7 +2783,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
            <div id="printable-proof" className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col relative">
               
               {/* CABEÇALHO SÓ PARA IMPRESSÃO (Logotipo no Papel) */}
-              <div className="hidden print:block p-8 border-b border-gray-300 mb-4">
+              <div className="hidden print:block p-8 border-b border-slate-300 mb-4">
                  <h1 className="text-2xl font-bold text-slate-900">EntregaCerta | Comprovante Digital</h1>
                  <p className="text-sm text-slate-500">Documento gerado eletronicamente em {new Date().toLocaleString()}</p>
               </div>
@@ -2857,14 +2857,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm border-b dark:border-slate-700 pb-1">Dados do Recebedor</h4>
                       <div className="space-y-3">
                          <div className="flex items-start gap-3">
-                            <User className="text-slate-400 mt-1" size={18} />
+                            <User className="text-slate-500 dark:text-slate-400 mt-1" size={18} />
                             <div>
                                <label className="block text-xs text-slate-500 dark:text-slate-400">Nome</label>
                                <span className="font-medium text-slate-800 dark:text-white text-lg">{viewingProof.proof.receiver_name}</span>
                             </div>
                          </div>
                          <div className="flex items-start gap-3">
-                            <FileText className="text-slate-400 mt-1" size={18} />
+                            <FileText className="text-slate-500 dark:text-slate-400 mt-1" size={18} />
                             <div>
                                <label className="block text-xs text-slate-500 dark:text-slate-400">Documento (RG/CPF)</label>
                                <span className="font-medium text-slate-800 dark:text-white">{viewingProof.proof.receiver_doc}</span>
@@ -2877,7 +2877,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       <h4 className="font-bold text-slate-700 dark:text-slate-300 uppercase text-sm border-b dark:border-slate-700 pb-1">Dados da Operação</h4>
                       <div className="space-y-3">
                          <div className="flex items-start gap-3">
-                            <Clock className="text-slate-400 mt-1" size={18} />
+                            <Clock className="text-slate-500 dark:text-slate-400 mt-1" size={18} />
                             <div>
                                <label className="block text-xs text-slate-500 dark:text-slate-400">Data/Hora</label>
                                <span className="font-medium text-slate-800 dark:text-white">
@@ -2886,7 +2886,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                             </div>
                          </div>
                          <div className="flex items-start gap-3">
-                            <MapIcon className="text-slate-400 mt-1" size={18} />
+                            <MapIcon className="text-slate-500 dark:text-slate-400 mt-1" size={18} />
                             <div>
                                <label className="block text-xs text-slate-500 dark:text-slate-400">Localização (GPS)</label>
                                <span className="font-medium text-slate-800 dark:text-white block">
@@ -2920,7 +2920,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       {viewingProof.proof.signature_data ? (
                         <img src={viewingProof.proof.signature_data} alt="Assinatura" className="max-h-full max-w-full" />
                       ) : (
-                        <span className="text-slate-400 italic text-sm">Não assinada</span>
+                        <span className="text-slate-500 dark:text-slate-400 italic text-sm">Não assinada</span>
                       )}
                     </div>
                   </div>
@@ -2936,7 +2936,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       {viewingProof.proof.photo_url ? (
                         <img src={viewingProof.proof.photo_url} alt="Evidência" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="text-slate-400 italic text-sm">Sem foto</span>
+                        <span className="text-slate-500 dark:text-slate-400 italic text-sm">Sem foto</span>
                       )}
                     </div>
                   </div>
@@ -2953,7 +2953,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       {viewingProof.proof.photo_stub_url ? (
                         <img src={viewingProof.proof.photo_stub_url} alt="Canhoto" className="w-full h-full object-cover" />
                       ) : (
-                        <span className="text-slate-400 italic text-sm">Não anexado</span>
+                        <span className="text-slate-500 dark:text-slate-400 italic text-sm">Não anexado</span>
                       )}
                     </div>
                   </div>
@@ -3087,14 +3087,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         </div>
                         <div>
                           <span className="font-bold text-slate-800 dark:text-white">{v.plate}</span>
-                          <span className="text-slate-400 text-sm ml-2">{v.model}</span>
+                          <span className="text-slate-500 dark:text-slate-400 text-sm ml-2">{v.model}</span>
                           {driver && <span className="ml-2 text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full">{driver.name}</span>}
                         </div>
                         <div className="flex items-center gap-1 ml-2">
                           <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`} />
                           <span className="text-xs text-slate-500">{isOnline ? 'Online' : 'Offline'}</span>
                           {v.last_location?.speed_kmh !== undefined && isOnline && (
-                            <span className="text-xs text-slate-400 ml-1">{v.last_location.speed_kmh} km/h</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 ml-1">{v.last_location.speed_kmh} km/h</span>
                           )}
                         </div>
                       </div>
@@ -3108,7 +3108,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
                     {/* Lista de notas */}
                     {vInvoices.length === 0 ? (
-                      <div className="px-5 py-4 text-sm text-slate-400 text-center">Nenhuma nota hoje</div>
+                      <div className="px-5 py-4 text-sm text-slate-500 dark:text-slate-400 text-center">Nenhuma nota hoje</div>
                     ) : (
                       <div className="divide-y divide-slate-100 dark:divide-slate-700">
                         {vInvoices.map(inv => {
@@ -3124,9 +3124,9 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                           return (
                             <div key={inv.id} className="flex items-center justify-between px-5 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                               <div className="flex items-center gap-3 min-w-0">
-                                <span className="text-xs font-mono text-slate-400 shrink-0">NF {inv.number}</span>
+                                <span className="text-xs font-mono text-slate-500 dark:text-slate-400 shrink-0">NF {inv.number}</span>
                                 <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{inv.customer_name}</span>
-                                <span className="text-xs text-slate-400 truncate hidden md:block">{inv.customer_address}</span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400 truncate hidden md:block">{inv.customer_address}</span>
                               </div>
                               <div className="flex items-center gap-3 shrink-0">
                                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">R$ {(inv.value ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
@@ -3197,7 +3197,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`}></div>
                                        {isOnline ? 'Sinal Ativo' : 'Offline'}
                                        {v.last_location?.speed_kmh !== undefined && isOnline && (
-                                         <span className="text-slate-400">{v.last_location.speed_kmh} km/h</span>
+                                         <span className="text-slate-500 dark:text-slate-400">{v.last_location.speed_kmh} km/h</span>
                                        )}
                                        {v.last_location?.source === 'salvadorsat' && (
                                          <span className="bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 px-1 rounded font-semibold">SAT</span>
@@ -3240,7 +3240,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     </div>
                     <div className="px-4 py-3 space-y-1.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-mono text-slate-400 shrink-0">NF {trackedInv.number}</span>
+                        <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 shrink-0">NF {trackedInv.number}</span>
                         <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate">
                           {trackedInv.customer_name}
                         </span>
@@ -3273,26 +3273,26 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                 <p className="text-lg font-black text-blue-600 dark:text-blue-400 leading-tight">
                                   {(trackedRoute.distanceM / 1000).toFixed(1)} km
                                 </p>
-                                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Distância</p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide font-bold">Distância</p>
                               </div>
                               <div>
                                 <p className="text-lg font-black text-slate-700 dark:text-slate-200 leading-tight">
                                   ~{Math.max(1, Math.round(trackedRoute.durationS / 60))} min
                                 </p>
-                                <p className="text-[10px] text-slate-400 uppercase tracking-wide font-bold">Com trânsito agora</p>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wide font-bold">Com trânsito agora</p>
                               </div>
                             </div>
                             <div className="flex items-center gap-1.5 pt-0.5">
                               <span className={`w-2 h-2 rounded-full ${traffic.dot} ${ratio >= 1.35 ? 'animate-pulse' : ''}`} />
                               <span className={`text-[11px] font-bold ${traffic.text}`}>{traffic.label}</span>
                               {delayMin >= 1 && (
-                                <span className="text-[11px] text-slate-400">· +{delayMin} min de atraso</span>
+                                <span className="text-[11px] text-slate-500 dark:text-slate-400">· +{delayMin} min de atraso</span>
                               )}
                             </div>
                           </>
                         );
                       })() : (
-                        <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                           <Loader2 size={13} className="animate-spin" /> Calculando rota...
                         </p>
                       )}
@@ -3516,7 +3516,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               
               {/* 👇 1. PARTE NOVA: Mostra o Valor Original/Importação 👇 */}
               <div className="mb-4 bg-slate-50 dark:bg-slate-700/50 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
-                <span className="block text-xs text-slate-400 uppercase font-bold mb-1">
+                <span className="block text-xs text-slate-500 dark:text-slate-400 uppercase font-bold mb-1">
                     Valor Original (Importação)
                 </span>
                 <span className="text-sm font-mono text-slate-600 dark:text-slate-300">
@@ -3547,7 +3547,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                 className="w-full text-2xl font-mono font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg p-3 focus:ring-2 focus:ring-green-500 outline-none"
                 autoFocus
               />
-              <p className="text-xs text-slate-400 mt-2">Use ponto para decimais (ex: 150.50)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Use ponto para decimais (ex: 150.50)</p>
             </div>
 
             <div className="flex justify-end gap-3">
@@ -3578,7 +3578,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
             <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300 my-4">
               <p>Você está prestes a <strong>{modalFinalize.outcome === 'CONCLUDED' ? 'concluir' : 'cancelar'}</strong> a devolução da nota <strong>{modalFinalize.invoice.number}</strong>.</p>
-              <p className="text-xs text-slate-400">Essa ação encerrará o fluxo de devolução e ficará registrada no histórico da nota. (Não reatribui para motorista.)</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Essa ação encerrará o fluxo de devolução e ficará registrada no histórico da nota. (Não reatribui para motorista.)</p>
 
               <label className="block text-xs font-bold text-slate-500 uppercase">Observação (opcional)</label>
               <textarea
@@ -3737,7 +3737,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     loading: false,
                   })
                 }
-                className="text-slate-400 hover:text-slate-200"
+                className="text-slate-500 dark:text-slate-400 hover:text-slate-200"
                 disabled={manualSettleModal.loading}
               >
                 <X size={18} />
@@ -3816,7 +3816,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col border border-slate-200 dark:border-slate-700">
               <div className="p-4 bg-slate-100 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center shrink-0">
                  <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><Settings size={20} className="text-slate-600 dark:text-slate-400"/> Configurações</h3>
-                 <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
+                 <button onClick={() => setShowSettings(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
               </div>
               <div className="p-6">
                  <h4 className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase">Segurança</h4>
@@ -3838,7 +3838,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh] border border-slate-200 dark:border-slate-700">
               <div className="p-4 bg-slate-100 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center shrink-0">
                  <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><UserPlus size={20} className="text-blue-600 dark:text-blue-400"/> Gerenciar Motoristas</h3>
-                 <button onClick={() => setShowAddDriver(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
+                 <button onClick={() => setShowAddDriver(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
               </div>
               
               <div className="p-6 border-b border-slate-100 dark:border-slate-700 shrink-0">
@@ -3860,13 +3860,13 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  <h4 className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase">Motoristas Cadastrados</h4>
                  <div className="space-y-2">
                     {drivers.length === 0 ? (
-                      <p className="text-center text-gray-400 text-sm italic">Nenhum motorista.</p>
+                      <p className="text-center text-slate-500 dark:text-slate-400 text-sm italic">Nenhum motorista.</p>
                     ) : (
                       drivers.map(d => (
-                        <div key={d.id} className="bg-white dark:bg-slate-800 p-3 rounded border border-gray-200 dark:border-slate-600 flex justify-between items-center shadow-sm">
+                        <div key={d.id} className="bg-white dark:bg-slate-800 p-3 rounded border border-slate-200 dark:border-slate-600 flex justify-between items-center shadow-sm">
                            <div>
                               <span className="font-medium text-slate-800 dark:text-white block">{d.name}</span>
-                              <div className="flex items-center gap-1 text-xs text-slate-400">
+                              <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                                 <KeyRound size={10} />
                                 <span className="font-mono">{d.password || 'Sem senha'}</span>
                               </div>
@@ -3904,7 +3904,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
                 <div className="p-6 space-y-6 overflow-y-auto">
                     {/* Resumo da Nota */}
-                    <div className="flex justify-between items-center border-b border-gray-100 dark:border-slate-700 pb-4">
+                    <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-700 pb-4">
                         <div>
                             <p className="text-xs text-slate-500 uppercase font-bold">Nota Fiscal</p>
                             <p className="text-xl font-mono font-bold text-slate-800 dark:text-white">
@@ -3976,7 +3976,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                             </div>
                         ) : (
                             // Mudei também o placeholder para 'h-20' para ficar proporcional
-                            <div className="h-20 bg-slate-50 dark:bg-slate-900 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-slate-400 text-sm gap-2">
+                            <div className="h-20 bg-slate-50 dark:bg-slate-900 border border-dashed border-slate-300 rounded-lg flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm gap-2">
                                 <ScanBarcode size={18} /> Nenhuma foto anexada
                             </div>
                         )}
@@ -4000,7 +4000,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
            <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh] border border-slate-200 dark:border-slate-700">
               <div className="p-4 bg-slate-100 dark:bg-slate-900 border-b dark:border-slate-700 flex justify-between items-center shrink-0">
                  <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2"><Truck size={20} className="text-blue-600 dark:text-blue-400"/> Gerenciar Veículos</h3>
-                 <button onClick={() => setShowAddVehicle(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
+                 <button onClick={() => setShowAddVehicle(false)} className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20} /></button>
               </div>
               
             <div className="p-6 border-b border-slate-100 dark:border-slate-700 shrink-0">
@@ -4086,12 +4086,12 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  <h4 className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-2 uppercase">Veículos Cadastrados</h4>
                  <div className="space-y-2">
                     {vehicles.length === 0 ? (
-                      <p className="text-center text-gray-400 text-sm italic">Nenhum veículo.</p>
+                      <p className="text-center text-slate-500 dark:text-slate-400 text-sm italic">Nenhum veículo.</p>
                     ) : (
                       vehicles.map(v => (
                         <div
                           key={v.id}
-                          className="bg-white dark:bg-slate-800 p-3 rounded border border-gray-200 dark:border-slate-600 flex justify-between items-center shadow-sm"
+                          className="bg-white dark:bg-slate-800 p-3 rounded border border-slate-200 dark:border-slate-600 flex justify-between items-center shadow-sm"
                         >
                            <div>
                              <span className="font-bold text-slate-800 dark:text-white uppercase block">
@@ -4218,7 +4218,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  <h3 className="font-bold text-slate-800 dark:text-white flex items-center gap-2">
                     <UploadCloud className="text-blue-600" /> Importar Notas Fiscais
                  </h3>
-                 <button onClick={() => { setShowImportModal(false); setImportSummary(null); }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20}/></button>
+                 <button onClick={() => { setShowImportModal(false); setImportSummary(null); }} className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={20}/></button>
               </div>
 
               <div className="p-6 flex-1 overflow-y-auto">
@@ -4300,10 +4300,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                 <h4 className="text-lg font-bold text-slate-700 dark:text-white mb-2">
                                     Arraste seus XMLs aqui
                                 </h4>
-                                <p className="text-sm text-slate-400 mb-6">
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
                                     ou clique para selecionar do computador
                                 </p>
-                                <div className="flex gap-4 text-xs text-slate-400">
+                                <div className="flex gap-4 text-xs text-slate-500 dark:text-slate-400">
                                     <span className="flex items-center gap-1"><FileCheck size={14}/> Múltiplos Arquivos</span>
                                     <span className="flex items-center gap-1"><CheckCircle size={14}/> Validação Automática</span>
                                 </div>
