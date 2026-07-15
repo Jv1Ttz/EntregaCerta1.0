@@ -217,12 +217,37 @@ export const db = {
   },
 
   getInvoicesByDriver: async (driverId: string): Promise<Invoice[]> => {
-    const { data } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('driver_id', driverId)
-      .is('deleted_at', null);
-    return (data as Invoice[]) || [];
+    // Pagina como o getInvoices: sem isso o PostgREST corta em ~1000 linhas e
+    // as notas excedentes somem da rota do motorista sem nenhum aviso.
+    // A ordenação não é cosmética — sem ela o corte pega linhas arbitrárias,
+    // e uma carga recém-atribuída pode nunca aparecer no app.
+    const pageSize = 500;
+    let all: Invoice[] = [];
+    let from = 0;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('driver_id', driverId)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false }) // desempate único: estabiliza a paginação
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error('Erro ao buscar invoices do motorista:', error);
+        break;
+      }
+
+      const batch = (data as Invoice[]) || [];
+      all = all.concat(batch);
+
+      if (batch.length < pageSize) break;
+      from += pageSize;
+    }
+
+    return all;
   },
 
   addInvoice: async (invoice: Invoice) => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
 import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon } from 'lucide-react';
@@ -11,6 +11,9 @@ import type { BackgroundGeolocationPlugin } from '@capacitor-community/backgroun
 
 // Registramos a variável manualmente
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
+
+/** Quantas entregas do histórico entram no DOM por vez. */
+const HISTORY_PAGE_SIZE = 50;
 // --- FUNÇÃO DE LIMPEZA INTELIGENTE ---
 const getSmartGPSAddress = (fullString: string, zip: string) => {
     const parts = fullString.split("||");
@@ -95,6 +98,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false); // Começa fechado
   const [historySearch, setHistorySearch] = useState('');
+  // Motorista veterano passa de 1000 entregas; renderizar tudo de uma vez trava o celular.
+  const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE_SIZE);
   
 
 
@@ -322,7 +327,28 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
   // Filtra e ORDENA por data (mais recente primeiro) 
-  const historyInvoices = invoices .filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED) .sort((a, b) => new Date(b.delivered_at || b.created_at).getTime() - new Date(a.delivered_at || a.created_at).getTime());  
+  const historyInvoices = useMemo(() =>
+    invoices
+      .filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED)
+      .sort((a, b) => new Date(b.delivered_at || b.created_at).getTime() - new Date(a.delivered_at || a.created_at).getTime()),
+    [invoices]
+  );
+
+  const filteredHistory = useMemo(() => {
+    const termo = historySearch.trim().toLowerCase();
+    if (!termo) return historyInvoices;
+    return historyInvoices.filter(inv =>
+      inv.number.toLowerCase().includes(termo) ||
+      inv.customer_name.toLowerCase().includes(termo) ||
+      inv.customer_address.toLowerCase().includes(termo)
+    );
+  }, [historyInvoices, historySearch]);
+
+  // Volta ao topo da lista sempre que a busca muda
+  useEffect(() => { setHistoryLimit(HISTORY_PAGE_SIZE); }, [historySearch]);
+
+  const visibleHistory = filteredHistory.slice(0, historyLimit);
+
   const currentVehicleId = pendingInvoices[0]?.vehicle_id;
   const currentVehicle = vehicles.find(v => v.id === currentVehicleId);
 
@@ -467,18 +493,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
                   </div>
 
                   {/* 2. LISTA FILTRADA */}
-                  {historyInvoices
-                    .filter(inv => {
-                        const search = historySearch.toLowerCase();
-                        return (
-                            inv.number.includes(search) ||
-                            inv.customer_name.toLowerCase().includes(search) ||
-                            inv.customer_address.toLowerCase().includes(search)
-                        );
-                    })
-                    .map(inv => (
-                    <div 
-                        key={inv.id} 
+                  {visibleHistory.map(inv => (
+                    <div
+                        key={inv.id}
                         onClick={() => setSelectedInvoice(inv)} // <--- CLIQUE PARA ABRIR
                         className="bg-white dark:bg-slate-800 p-4 rounded-lg border border-gray-200 dark:border-slate-700 flex justify-between items-center opacity-90 hover:opacity-100 active:scale-[0.98] transition-all cursor-pointer shadow-sm hover:shadow-md"
                     >
@@ -507,10 +524,24 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
                     </div>
                   ))}
                   
-                  {historyInvoices.length > 0 && historyInvoices.filter(i => i.number.includes(historySearch)).length === 0 && (
+                  {filteredHistory.length === 0 && (
                       <div className="text-center p-4 text-sm text-gray-400 italic">
                           Nenhuma nota encontrada.
                       </div>
+                  )}
+
+                  {filteredHistory.length > visibleHistory.length && (
+                    <div className="space-y-2 pt-1">
+                      <p className="text-center text-xs text-gray-400">
+                        Mostrando {visibleHistory.length} de {filteredHistory.length}
+                      </p>
+                      <button
+                        onClick={() => setHistoryLimit(l => l + HISTORY_PAGE_SIZE)}
+                        className="w-full py-3 rounded-lg bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm font-bold text-blue-600 dark:text-blue-400 active:scale-[0.98] transition-all"
+                      >
+                        Carregar mais {Math.min(HISTORY_PAGE_SIZE, filteredHistory.length - visibleHistory.length)}
+                      </button>
+                    </div>
                   )}
                 </div>
             )}
