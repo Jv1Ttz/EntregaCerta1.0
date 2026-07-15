@@ -25,12 +25,20 @@ const formatBRL = (v?: number | null) =>
 /** Notas que não fecharam entrega: falhas (devolução) e pendências. */
 const OCORRENCIA_STATUSES = ['FAILED', 'ISSUE', 'RETURNED'];
 
-type TipoKey = 'TOTAL' | 'PARTIAL' | 'ITEM_FALTANTE' | 'SEM_TIPO';
+/** FAILED/RETURNED = a mercadoria voltou; ISSUE = ficou pendente com o cliente. */
+const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  FAILED:   { label: 'Devolvido', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  RETURNED: { label: 'Devolvido', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  ISSUE:    { label: 'Pendência', color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+};
+
+type TipoKey = 'TOTAL' | 'PARTIAL' | 'ITEM_FALTANTE' | 'AVARIA' | 'SEM_TIPO';
 
 const TIPO_CONFIG: Record<TipoKey, { label: string; color: string }> = {
-  TOTAL:         { label: 'Devolução Total',   color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
-  PARTIAL:       { label: 'Devolução Parcial', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' },
-  ITEM_FALTANTE: { label: 'Item Faltante',     color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  TOTAL:         { label: 'Devolução Total',   color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  PARTIAL:       { label: 'Devolução Parcial', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  ITEM_FALTANTE: { label: 'Item Faltante',     color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  AVARIA:        { label: 'Avaria',            color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
   SEM_TIPO:      { label: 'Sem tipo',          color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' },
 };
 
@@ -39,6 +47,7 @@ const getTipo = (proof?: ProofSummary): TipoKey => {
     case 'TOTAL':         return 'TOTAL';
     case 'PARTIAL':       return 'PARTIAL';
     case 'ITEM_FALTANTE': return 'ITEM_FALTANTE';
+    case 'AVARIA':        return 'AVARIA';
     default:              return 'SEM_TIPO';
   }
 };
@@ -144,9 +153,11 @@ const DevolucoesTab: React.FC = () => {
   }, [invoices, proofs, drivers, search, filterTipo, filterMotorista, filterStart, filterEnd]);
 
   const resumo = useMemo(() => ({
-    total:         rows.length,
-    devTotal:      rows.filter(r => r.tipo === 'TOTAL').length,
-    devParcial:    rows.filter(r => r.tipo === 'PARTIAL').length,
+    total:          rows.length,
+    devTotal:       rows.filter(r => r.tipo === 'TOTAL').length,
+    devParcial:     rows.filter(r => r.tipo === 'PARTIAL').length,
+    // Valor Total = exposição (soma das notas); Valor Devolvido = perda real.
+    valorTotal:     rows.reduce((acc, r) => acc + (r.inv.value || 0), 0),
     valorDevolvido: rows.reduce((acc, r) => acc + (r.perda || 0), 0),
   }), [rows]);
 
@@ -161,17 +172,19 @@ const DevolucoesTab: React.FC = () => {
   };
 
   const exportCsv = () => {
-    const headers = ['Data', 'NF', 'Cliente', 'Tipo', 'Motivo', 'Motorista', 'Veículo', 'Valor da Nota', 'Valor Devolvido'];
+    const headers = ['Data', 'NF', 'Cliente', 'Motorista', 'Veículo', 'Status', 'Tipo', 'Motivo', 'Itens Devolvidos', 'Valor da Nota', 'Valor Devolvido'];
     // ; como separador e BOM para o Excel pt-BR abrir com acentos e colunas corretas
     const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = rows.map(r => [
       formatDateTime(r.data),
       r.inv.number || '',
       r.inv.customer_name || '',
-      TIPO_CONFIG[r.tipo].label,
-      r.motivo || 'MOTIVO NAO REGISTRADO NO SISTEMA',
       driverName(r.inv.driver_id),
       vehiclePlate(r.inv.vehicle_id),
+      STATUS_CONFIG[r.inv.status]?.label || r.inv.status,
+      TIPO_CONFIG[r.tipo].label,
+      r.motivo || 'MOTIVO NAO REGISTRADO NO SISTEMA',
+      (r.proof?.return_items || '').replace(/\n/g, ' | '),
       String(r.inv.value ?? '').replace('.', ','),
       String(r.perda ?? '').replace('.', ','),
     ].map(escape).join(';'));
@@ -200,12 +213,13 @@ const DevolucoesTab: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Cards de resumo */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: 'Ocorrências',     value: String(resumo.total),           color: 'text-slate-900 dark:text-white' },
-          { label: 'Devolução Total', value: String(resumo.devTotal),        color: 'text-red-600 dark:text-red-400' },
-          { label: 'Dev. Parcial',    value: String(resumo.devParcial),      color: 'text-orange-600 dark:text-orange-400' },
+          { label: 'Ocorrências',     value: String(resumo.total),            color: 'text-slate-900 dark:text-white' },
+          { label: 'Valor Total',     value: formatBRL(resumo.valorTotal),    color: 'text-slate-900 dark:text-white' },
           { label: 'Valor Devolvido', value: formatBRL(resumo.valorDevolvido), color: 'text-red-600 dark:text-red-400' },
+          { label: 'Dev. Total',      value: String(resumo.devTotal),         color: 'text-red-700 dark:text-red-300' },
+          { label: 'Dev. Parcial',    value: String(resumo.devParcial),       color: 'text-amber-600 dark:text-amber-400' },
         ].map(card => (
           <div key={card.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm">
             <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">{card.label}</p>
@@ -300,38 +314,55 @@ const DevolucoesTab: React.FC = () => {
                   <th className="px-3 py-2 whitespace-nowrap">Data</th>
                   <th className="px-3 py-2">NF</th>
                   <th className="px-3 py-2">Cliente</th>
-                  <th className="px-3 py-2">Tipo</th>
-                  <th className="px-3 py-2">Motivo</th>
                   <th className="px-3 py-2">Motorista</th>
                   <th className="px-3 py-2">Veículo</th>
+                  <th className="px-3 py-2">Status</th>
+                  <th className="px-3 py-2">Tipo</th>
+                  <th className="px-3 py-2">Motivo / Itens</th>
                   <th className="px-3 py-2 text-right whitespace-nowrap">Devolvido</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => (
+                {rows.map(r => {
+                  const status = STATUS_CONFIG[r.inv.status];
+                  return (
                   <tr key={r.inv.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60">
                     <td className="px-3 py-2 text-[11px] whitespace-nowrap font-mono text-slate-500 dark:text-slate-400">
                       {formatDateTime(r.data)}
                     </td>
                     <td className="px-3 py-2 font-semibold whitespace-nowrap">{r.inv.number || '-'}</td>
-                    <td className="px-3 py-2 max-w-[14rem] truncate" title={r.inv.customer_name}>{r.inv.customer_name}</td>
+                    <td className="px-3 py-2 max-w-[12rem]">
+                      <span className="line-clamp-2 text-xs" title={r.inv.customer_name}>{r.inv.customer_name}</span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-xs">{driverName(r.inv.driver_id)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap font-mono text-[11px]">{vehiclePlate(r.inv.vehicle_id)}</td>
+                    <td className="px-3 py-2">
+                      {status && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${status.color}`}>
+                          {status.label}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${TIPO_CONFIG[r.tipo].color}`}>
                         {TIPO_CONFIG[r.tipo].label}
                       </span>
                     </td>
-                    <td className="px-3 py-2 max-w-[18rem]">
+                    <td className="px-3 py-2 max-w-[16rem]">
                       {r.motivo
-                        ? <span className="line-clamp-2" title={r.motivo}>{r.motivo}</span>
-                        : <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">MOTIVO NÃO REGISTRADO</span>}
+                        ? <p className="font-medium text-slate-700 dark:text-slate-200 text-xs mb-0.5 line-clamp-2" title={r.motivo}>{r.motivo}</p>
+                        : <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">MOTIVO NÃO REGISTRADO</p>}
+                      {/* Numa devolução total voltou tudo — listar os itens seria redundante. */}
+                      {r.proof?.return_items && r.tipo !== 'TOTAL' && (
+                        <p className="text-slate-500 dark:text-slate-400 text-xs whitespace-pre-line leading-tight">{r.proof.return_items}</p>
+                      )}
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{driverName(r.inv.driver_id)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap font-mono text-[11px]">{vehiclePlate(r.inv.vehicle_id)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-red-600 dark:text-red-400">
                       {formatBRL(r.perda)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -638,6 +669,16 @@ export const AdminAuditView: React.FC = () => {
             Logs de Atividade
           </button>
           <button
+            onClick={() => setActiveTab('deleted')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              activeTab === 'deleted'
+                ? 'bg-red-600 text-white shadow'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+          >
+            Notas Excluídas
+          </button>
+          <button
             onClick={() => setActiveTab('devolucoes')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
               activeTab === 'devolucoes'
@@ -648,21 +689,11 @@ export const AdminAuditView: React.FC = () => {
             <TrendingDown size={15} />
             Devoluções
           </button>
-          <button
-            onClick={() => setActiveTab('deleted')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              activeTab === 'deleted'
-                ? 'bg-red-600 text-white shadow'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-            }`}
-          >
-            Notas Excluídas
-          </button>
         </div>
 
         {activeTab === 'logs' && <ActivityLogsTab />}
-        {activeTab === 'devolucoes' && <DevolucoesTab />}
         {activeTab === 'deleted' && <DeletedInvoicesTab />}
+        {activeTab === 'devolucoes' && <DevolucoesTab />}
       </div>
     </div>
   );
