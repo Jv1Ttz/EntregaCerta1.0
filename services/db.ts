@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
+import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
 
 // Senha de admin padrão
 
@@ -474,6 +474,32 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   getProofByInvoiceId: async (invoiceId: string): Promise<DeliveryProof | undefined> => {
     const { data } = await supabase.from('delivery_proofs').select('*').eq('invoice_id', invoiceId).single();
     return data as DeliveryProof || undefined;
+  },
+
+  /**
+   * Busca comprovantes de várias notas de uma vez, indexados por invoice_id.
+   * Omite signature_data/photo_url/photo_stub_url de propósito: são base64 de
+   * centenas de MB no total e estourariam o tráfego numa listagem.
+   */
+  getProofsByInvoiceIds: async (invoiceIds: string[]): Promise<Record<string, ProofSummary>> => {
+    const map: Record<string, ProofSummary> = {};
+    if (!invoiceIds.length) return map;
+
+    const chunkSize = 200; // evita URL longa demais no filtro .in()
+    for (let i = 0; i < invoiceIds.length; i += chunkSize) {
+      const chunk = invoiceIds.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('delivery_proofs')
+        .select('invoice_id, receiver_name, delivered_at, failure_reason, notes, return_type, return_items')
+        .in('invoice_id', chunk);
+
+      if (error) {
+        console.error('Erro ao buscar comprovantes em lote:', error);
+        continue;
+      }
+      (data as ProofSummary[] | null)?.forEach(p => { map[p.invoice_id] = p; });
+    }
+    return map;
   },
 
   // Baixa manual pelo gestor (sem intervenção do motorista)

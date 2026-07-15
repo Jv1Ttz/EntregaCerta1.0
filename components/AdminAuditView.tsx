@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/db';
-import type { Invoice, ActivityLog, ActivityLogEventType } from '../types';
-import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw } from 'lucide-react';
+import type { Invoice, ActivityLog, ActivityLogEventType, ProofSummary, Driver, Vehicle } from '../types';
+import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw, TrendingDown, Download } from 'lucide-react';
 
 // ─── Configuração dos tipos de evento ───────────────────────────────────────
 
@@ -15,6 +15,330 @@ const EVENT_CONFIG: Record<ActivityLogEventType, { label: string; color: string 
 const formatDateTime = (iso?: string | null) => {
   if (!iso) return '-';
   try { return new Date(iso).toLocaleString('pt-BR'); } catch { return iso ?? '-'; }
+};
+
+const formatBRL = (v?: number | null) =>
+  typeof v === 'number' ? v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-';
+
+// ─── Aba: Devoluções ─────────────────────────────────────────────────────────
+
+/** Notas que não fecharam entrega: falhas (devolução) e pendências. */
+const OCORRENCIA_STATUSES = ['FAILED', 'ISSUE', 'RETURNED'];
+
+type TipoKey = 'TOTAL' | 'PARTIAL' | 'ITEM_FALTANTE' | 'SEM_TIPO';
+
+const TIPO_CONFIG: Record<TipoKey, { label: string; color: string }> = {
+  TOTAL:         { label: 'Devolução Total',   color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+  PARTIAL:       { label: 'Devolução Parcial', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' },
+  ITEM_FALTANTE: { label: 'Item Faltante',     color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  SEM_TIPO:      { label: 'Sem tipo',          color: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' },
+};
+
+const getTipo = (proof?: ProofSummary): TipoKey => {
+  switch (proof?.return_type) {
+    case 'TOTAL':         return 'TOTAL';
+    case 'PARTIAL':       return 'PARTIAL';
+    case 'ITEM_FALTANTE': return 'ITEM_FALTANTE';
+    default:              return 'SEM_TIPO';
+  }
+};
+
+/**
+ * O motivo confiável vive em delivery_proofs.failure_reason — invoices.last_failure_reason
+ * costuma vir vazio ou só com "concluir devolução", sem o motivo original.
+ */
+const getMotivo = (inv: Invoice, proof?: ProofSummary): string =>
+  proof?.failure_reason?.trim() ||
+  proof?.notes?.trim() ||
+  inv.last_failure_reason?.trim() ||
+  inv.failure_reason?.trim() ||
+  '';
+
+/** Mesma regra do dashboard do gestor: usa return_value quando existe, senão perda total. */
+const getPerda = (inv: Invoice): number =>
+  inv.return_value !== undefined && inv.return_value !== null ? Number(inv.return_value) : inv.value;
+
+/** Data em que a ocorrência aconteceu. */
+const getDataOcorrencia = (inv: Invoice, proof?: ProofSummary): string =>
+  proof?.delivered_at || inv.delivered_at || inv.created_at;
+
+const DevolucoesTab: React.FC = () => {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [proofs, setProofs] = useState<Record<string, ProofSummary>>({});
+  const [drivers, setDrivers] = useState<Driver[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [search, setSearch] = useState('');
+  const [filterTipo, setFilterTipo] = useState<TipoKey | ''>('');
+  const [filterMotorista, setFilterMotorista] = useState('');
+  const [filterStart, setFilterStart] = useState('');
+  const [filterEnd, setFilterEnd] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        const [allInvoices, allDrivers, allVehicles] = await Promise.all([
+          db.getInvoices(),
+          db.getDrivers(),
+          db.getVehicles(),
+        ]);
+
+        const ocorrencias = allInvoices.filter(i => OCORRENCIA_STATUSES.includes(i.status));
+        setInvoices(ocorrencias);
+        setDrivers(allDrivers);
+        setVehicles(allVehicles);
+        setProofs(await db.getProofsByInvoiceIds(ocorrencias.map(i => i.id)));
+      } catch (e) {
+        console.error(e);
+        setError('Erro ao carregar devoluções.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const driverName = (id: string | null) => drivers.find(d => d.id === id)?.name || '-';
+  const vehiclePlate = (id: string | null) => vehicles.find(v => v.id === id)?.plate || '-';
+
+  const rows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return invoices
+      .map(inv => {
+        const proof = proofs[inv.id];
+        return {
+          inv,
+          proof,
+          tipo: getTipo(proof),
+          motivo: getMotivo(inv, proof),
+          perda: getPerda(inv),
+          data: getDataOcorrencia(inv, proof),
+        };
+      })
+      .filter(r => {
+        if (filterTipo && r.tipo !== filterTipo) return false;
+        if (filterMotorista && r.inv.driver_id !== filterMotorista) return false;
+
+        if (filterStart || filterEnd) {
+          const dia = (r.data || '').slice(0, 10);
+          if (filterStart && dia < filterStart) return false;
+          if (filterEnd && dia > filterEnd) return false;
+        }
+
+        if (term) {
+          const haystack = [
+            r.inv.number,
+            r.inv.customer_name,
+            r.motivo,
+            driverName(r.inv.driver_id),
+          ].join(' ').toLowerCase();
+          if (!haystack.includes(term)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+  }, [invoices, proofs, drivers, search, filterTipo, filterMotorista, filterStart, filterEnd]);
+
+  const resumo = useMemo(() => ({
+    total:         rows.length,
+    devTotal:      rows.filter(r => r.tipo === 'TOTAL').length,
+    devParcial:    rows.filter(r => r.tipo === 'PARTIAL').length,
+    valorDevolvido: rows.reduce((acc, r) => acc + (r.perda || 0), 0),
+  }), [rows]);
+
+  const hasFilter = !!(search || filterTipo || filterMotorista || filterStart || filterEnd);
+
+  const clearFilters = () => {
+    setSearch('');
+    setFilterTipo('');
+    setFilterMotorista('');
+    setFilterStart('');
+    setFilterEnd('');
+  };
+
+  const exportCsv = () => {
+    const headers = ['Data', 'NF', 'Cliente', 'Tipo', 'Motivo', 'Motorista', 'Veículo', 'Valor da Nota', 'Valor Devolvido'];
+    // ; como separador e BOM para o Excel pt-BR abrir com acentos e colunas corretas
+    const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = rows.map(r => [
+      formatDateTime(r.data),
+      r.inv.number || '',
+      r.inv.customer_name || '',
+      TIPO_CONFIG[r.tipo].label,
+      r.motivo || 'MOTIVO NAO REGISTRADO NO SISTEMA',
+      driverName(r.inv.driver_id),
+      vehiclePlate(r.inv.vehicle_id),
+      String(r.inv.value ?? '').replace('.', ','),
+      String(r.perda ?? '').replace('.', ','),
+    ].map(escape).join(';'));
+
+    const csv = '﻿' + [headers.map(escape).join(';'), ...lines].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `devolucoes_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-16 gap-2 text-slate-400 text-sm">
+      <Loader2 size={18} className="animate-spin" /> Carregando devoluções...
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center gap-2 text-red-500 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded-md text-sm">
+      <AlertCircle size={16} />{error}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      {/* Cards de resumo */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {[
+          { label: 'Ocorrências',     value: String(resumo.total),           color: 'text-slate-900 dark:text-white' },
+          { label: 'Devolução Total', value: String(resumo.devTotal),        color: 'text-red-600 dark:text-red-400' },
+          { label: 'Dev. Parcial',    value: String(resumo.devParcial),      color: 'text-orange-600 dark:text-orange-400' },
+          { label: 'Valor Devolvido', value: formatBRL(resumo.valorDevolvido), color: 'text-red-600 dark:text-red-400' },
+        ].map(card => (
+          <div key={card.label} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm">
+            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wide">{card.label}</p>
+            <p className={`text-xl font-black mt-1 ${card.color}`}>{card.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Filtros */}
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 shadow-sm space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="NF, cliente, motivo..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full pl-8 p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div className="relative">
+            <Filter size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <select
+              value={filterTipo}
+              onChange={e => setFilterTipo(e.target.value as TipoKey | '')}
+              className="w-full pl-8 p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200 appearance-none"
+            >
+              <option value="">Todos os tipos</option>
+              {(Object.keys(TIPO_CONFIG) as TipoKey[]).map(k => (
+                <option key={k} value={k}>{TIPO_CONFIG[k].label}</option>
+              ))}
+            </select>
+          </div>
+
+          <select
+            value={filterMotorista}
+            onChange={e => setFilterMotorista(e.target.value)}
+            className="w-full p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200 appearance-none"
+          >
+            <option value="">Todos os motoristas</option>
+            {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+
+          <div className="flex gap-2 items-center bg-slate-50 dark:bg-slate-900/50 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+            <div className="relative flex-1 min-w-0">
+              <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-800 px-1 text-[10px] text-slate-400 font-bold z-10 uppercase">De</span>
+              <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)}
+                className="w-full p-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+              />
+            </div>
+            <div className="relative flex-1 min-w-0">
+              <span className="absolute -top-2 left-2 bg-slate-50 dark:bg-slate-800 px-1 text-[10px] text-slate-400 font-bold z-10 uppercase">Até</span>
+              <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)}
+                className="w-full p-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-md text-sm outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 dark:text-slate-200"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between">
+          {hasFilter ? (
+            <button onClick={clearFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1">
+              <X size={12} /> Limpar filtros
+            </button>
+          ) : <span />}
+          <button
+            onClick={exportCsv}
+            disabled={rows.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download size={13} /> Exportar CSV
+          </button>
+        </div>
+      </div>
+
+      {/* Tabela */}
+      {rows.length === 0 ? (
+        <div className="border border-dashed border-slate-300 dark:border-slate-700 rounded-lg p-8 text-center text-slate-500 dark:text-slate-400 text-sm">
+          {hasFilter ? 'Nenhuma devolução encontrada com os filtros atuais.' : 'Nenhuma devolução registrada.'}
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
+            {rows.length} ocorrência(s)
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-xs md:text-sm text-left text-slate-700 dark:text-slate-200">
+              <thead className="bg-slate-100 dark:bg-slate-900 text-[11px] uppercase text-slate-500 dark:text-slate-400">
+                <tr>
+                  <th className="px-3 py-2 whitespace-nowrap">Data</th>
+                  <th className="px-3 py-2">NF</th>
+                  <th className="px-3 py-2">Cliente</th>
+                  <th className="px-3 py-2">Tipo</th>
+                  <th className="px-3 py-2">Motivo</th>
+                  <th className="px-3 py-2">Motorista</th>
+                  <th className="px-3 py-2">Veículo</th>
+                  <th className="px-3 py-2 text-right whitespace-nowrap">Devolvido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => (
+                  <tr key={r.inv.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                    <td className="px-3 py-2 text-[11px] whitespace-nowrap font-mono text-slate-500 dark:text-slate-400">
+                      {formatDateTime(r.data)}
+                    </td>
+                    <td className="px-3 py-2 font-semibold whitespace-nowrap">{r.inv.number || '-'}</td>
+                    <td className="px-3 py-2 max-w-[14rem] truncate" title={r.inv.customer_name}>{r.inv.customer_name}</td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap ${TIPO_CONFIG[r.tipo].color}`}>
+                        {TIPO_CONFIG[r.tipo].label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 max-w-[18rem]">
+                      {r.motivo
+                        ? <span className="line-clamp-2" title={r.motivo}>{r.motivo}</span>
+                        : <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">MOTIVO NÃO REGISTRADO</span>}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{driverName(r.inv.driver_id)}</td>
+                    <td className="px-3 py-2 whitespace-nowrap font-mono text-[11px]">{vehiclePlate(r.inv.vehicle_id)}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-red-600 dark:text-red-400">
+                      {formatBRL(r.perda)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 };
 
 // ─── Aba: Notas Excluídas ────────────────────────────────────────────────────
@@ -286,7 +610,7 @@ const ActivityLogsTab: React.FC = () => {
 // ─── Componente Principal ────────────────────────────────────────────────────
 
 export const AdminAuditView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'deleted' | 'logs'>('logs');
+  const [activeTab, setActiveTab] = useState<'deleted' | 'logs' | 'devolucoes'>('logs');
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
@@ -297,7 +621,7 @@ export const AdminAuditView: React.FC = () => {
             Administrador
           </h1>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
-            Auditoria do sistema — logs de atividade e notas excluídas.
+            Auditoria do sistema — logs de atividade, devoluções e notas excluídas.
           </p>
         </header>
 
@@ -314,6 +638,17 @@ export const AdminAuditView: React.FC = () => {
             Logs de Atividade
           </button>
           <button
+            onClick={() => setActiveTab('devolucoes')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
+              activeTab === 'devolucoes'
+                ? 'bg-orange-600 text-white shadow'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+          >
+            <TrendingDown size={15} />
+            Devoluções
+          </button>
+          <button
             onClick={() => setActiveTab('deleted')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               activeTab === 'deleted'
@@ -325,7 +660,9 @@ export const AdminAuditView: React.FC = () => {
           </button>
         </div>
 
-        {activeTab === 'logs' ? <ActivityLogsTab /> : <DeletedInvoicesTab />}
+        {activeTab === 'logs' && <ActivityLogsTab />}
+        {activeTab === 'devolucoes' && <DevolucoesTab />}
+        {activeTab === 'deleted' && <DeletedInvoicesTab />}
       </div>
     </div>
   );

@@ -103,6 +103,15 @@ export interface DeliveryProof {
   failure_reason?: string;
 }
 
+/**
+ * Subconjunto leve de DeliveryProof, sem as colunas base64
+ * (signature_data/photo_url/photo_stub_url). Usado em listagens.
+ */
+export type ProofSummary = Pick<
+  DeliveryProof,
+  'invoice_id' | 'receiver_name' | 'delivered_at' | 'failure_reason' | 'notes' | 'return_type' | 'return_items'
+>;
+
 export interface AppNotification {
   id: string;
   recipient_id: string; // 'ADMIN' or driverId
