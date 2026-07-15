@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
+import { isReturnProof, formatProofReason } from '../constants/returnReasons';
 import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite, Navigation2 } from 'lucide-react';
 import Map, { Marker, NavigationControl, Source, Layer } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
@@ -1308,12 +1309,12 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
 
             {/* Header */}
             <div className={`p-5 text-white flex justify-between items-center ${
-              viewingProof.proof.failure_reason ? 'bg-red-600 dark:bg-red-700' : 'bg-green-600 dark:bg-green-700'
+              isReturnProof(viewingProof.proof) ? 'bg-red-600 dark:bg-red-700' : 'bg-green-600 dark:bg-green-700'
             }`}>
               <div>
                 <h3 className="font-bold flex items-center gap-2 text-lg">
                   <FileText size={22} />
-                  {viewingProof.proof.failure_reason ? 'Devolução / Falha' : 'Comprovante de Entrega'}
+                  {isReturnProof(viewingProof.proof) ? 'Devolução / Falha' : 'Comprovante de Entrega'}
                 </h3>
                 <p className="text-white/80 text-sm mt-1">
                   NF-e {viewingProof.invoice.number} • R$ {viewingProof.invoice.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -1327,14 +1328,14 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             <div className="overflow-y-auto p-6 space-y-6">
 
               {/* Banner falha/devolução */}
-              {viewingProof.proof.failure_reason && (
+              {isReturnProof(viewingProof.proof) && (
                 <div className="border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 p-4 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold block mb-1">
                       {viewingProof.proof.return_type === 'PARTIAL' ? 'Devolução Parcial' : 'Devolução Total'}
                     </span>
-                    <p className="text-sm">{viewingProof.proof.failure_reason}</p>
+                    <p className="text-sm">{formatProofReason(viewingProof.proof)}</p>
                     {viewingProof.proof.return_type === 'PARTIAL' && viewingProof.proof.return_items && (
                       <pre className="mt-2 text-sm whitespace-pre-wrap font-sans bg-white/50 dark:bg-black/20 p-2 rounded">
                         {viewingProof.proof.return_items}

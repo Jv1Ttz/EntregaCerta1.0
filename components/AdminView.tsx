@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
+import { isReturnProof, formatProofReason } from '../constants/returnReasons';
 import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
@@ -2713,7 +2714,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   <h4 className="font-bold text-slate-700 dark:text-slate-200 mb-2">Resumo da Finalização</h4>
                   <div>
                     <p className="text-sm text-slate-600 dark:text-slate-300"><strong>Motivo registrado pelo motorista:</strong></p>
-                    <pre className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200 bg-transparent mt-2">{viewingProof.proof.failure_reason || viewingProof.invoice.last_failure_reason || '—'}</pre>
+                    <pre className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-200 bg-transparent mt-2">{formatProofReason(viewingProof.proof) || viewingProof.invoice.last_failure_reason || '—'}</pre>
                   </div>
                   <div>
                     <p className="text-sm text-slate-600 dark:text-slate-300"><strong>Observação do gestor:</strong></p>
@@ -2791,17 +2792,17 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
              {/* Cabeçalho Visual da Tela (Versão 2.0 - Com Pendência) */}
               <div className={`p-5 text-white flex justify-between items-center ${
                   viewingProof.invoice.status === 'ISSUE' ? 'bg-orange-600 dark:bg-orange-700' :
-                  viewingProof.proof.failure_reason ? 'bg-red-600 dark:bg-red-700' : 
+                  isReturnProof(viewingProof.proof) ? 'bg-red-600 dark:bg-red-700' :
                   'bg-green-600 dark:bg-green-700'
               }`}>
                   <div>
                      <h3 className="font-bold flex items-center gap-2 text-lg">
                        {/* Ícone muda se for Pendência */}
                        {viewingProof.invoice.status === 'ISSUE' ? <AlertOctagon size={22}/> : <FileText size={22} />}
-                       
+
                        {/* Texto muda conforme a situação */}
                        {viewingProof.invoice.status === 'ISSUE' ? 'Pendência Registrada' :
-                        viewingProof.proof.failure_reason ? 'Devolução / Falha' : 'Comprovante de Entrega'}
+                        isReturnProof(viewingProof.proof) ? 'Devolução / Falha' : 'Comprovante de Entrega'}
                      </h3>
                      
                      <p className="text-white/80 text-sm mt-1">
@@ -2819,7 +2820,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                 
                 {/* Status Banner */}
                 {/* STATUS BANNER (ATUALIZADO PARA SUPORTAR PARCIAL/TOTAL) */}
-                {viewingProof.proof.failure_reason && (
+                {isReturnProof(viewingProof.proof) && (
                   <div className={`border p-4 rounded-lg flex items-start gap-3 ${viewingProof.proof.return_type === 'PARTIAL' ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-800 dark:text-orange-300' : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'}`}>
                     
                     <AlertTriangle className="shrink-0 mt-0.5" />
@@ -2837,7 +2838,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
                       <div className="mt-2 text-sm bg-white/50 dark:bg-black/20 p-3 rounded">
                         <strong className="block text-xs opacity-70 uppercase mb-1">Motivo:</strong>
-                        {viewingProof.proof.failure_reason}
+                        {formatProofReason(viewingProof.proof)}
                       </div>
 
                       {/* MOSTRA ITENS SE FOR PARCIAL */}

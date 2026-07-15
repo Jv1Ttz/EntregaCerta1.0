@@ -4,6 +4,7 @@ import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotificatio
 import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
+import { getReasonsFor, REASON_REQUIRES_DETAIL } from '../constants/returnReasons';
 import { registerPlugin } from '@capacitor/core';
 // Importamos o TIPO para o TypeScript entender os comandos
 import type { BackgroundGeolocationPlugin } from '@capacitor-community/background-geolocation';
@@ -541,9 +542,18 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
 
   // Estados de Devolução
   const [failureReason, setFailureReason] = useState('');
+  const [reasonCode, setReasonCode] = useState('');
   const [returnType, setReturnType] = useState<'TOTAL' | 'PARTIAL'>('TOTAL');
   const [returnItems, setReturnItems] = useState('');
   const [selectedReturnItems, setSelectedReturnItems] = useState<string[]>([]);
+
+  // Os motivos de TOTAL e PARTIAL são listas diferentes: ao trocar o tipo, o
+  // código escolhido pode não existir na outra lista.
+  useEffect(() => {
+    if (reasonCode && !getReasonsFor(returnType).some(r => r.code === reasonCode)) {
+      setReasonCode('');
+    }
+  }, [returnType, reasonCode]);
 
   useEffect(() => {
     if (!frozenGeo && currentGeo) {
@@ -659,9 +669,15 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
     } 
     // 3. Validações de Devolução
     else {
-      const reasonToCheck = reasonOverride || failureReason;
-      if (!reasonToCheck) {
-        notify("Motivo Obrigatório", "Informe o motivo da devolução.", "WARNING");
+      if (!reasonOverride && !reasonCode) {
+        notify("Motivo Obrigatório", "Selecione o motivo da devolução.", "WARNING");
+        return;
+      }
+
+      // "Outro" sem descrição é o que gerava registros inúteis do tipo
+      // "concluir devolução" — sem o texto, o motivo não diz nada.
+      if (reasonCode === REASON_REQUIRES_DETAIL && !failureReason.trim()) {
+        notify("Descrição Obrigatória", "Ao escolher 'Outro', descreva o que aconteceu.", "WARNING");
         return;
       }
 
@@ -728,7 +744,8 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
             // Usamos 'null' em vez de 'undefined' para LIMPAR o banco de dados
             return_type: success ? null : returnType,
             return_items: success ? null : finalReturnItemsString,
-            failure_reason: success ? null : (reasonOverride || failureReason),
+            failure_reason: success ? null : (reasonOverride || failureReason.trim() || null),
+            failure_reason_code: success ? null : (reasonOverride ? null : reasonCode),
             // 👆 Se for sucesso, força APAGAR esses campos antigos 👆
             geo_lat: frozenGeo?.lat || null,
             geo_long: frozenGeo?.lng || null,
@@ -835,12 +852,60 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
              </div>
            )}
 
-           {/* Motivo Obrigatório */}
+           {/* Motivo padronizado (obrigatório) */}
+           <div className="space-y-3">
+              <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">
+                Motivo da devolução <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-1 gap-2">
+                {getReasonsFor(returnType).map(reason => {
+                  const isSelected = reasonCode === reason.code;
+                  return (
+                    <button
+                      key={reason.code}
+                      onClick={() => setReasonCode(reason.code)}
+                      className={`p-3 rounded-lg border text-left transition-all flex items-center justify-between gap-2 ${
+                        isSelected
+                          ? 'bg-red-600 text-white border-red-600 shadow-md'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-gray-300 dark:border-slate-600 active:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex flex-col">
+                        <span className="font-bold text-sm leading-tight">{reason.label}</span>
+                        {reason.hint && (
+                          <span className={`text-xs font-normal mt-0.5 ${isSelected ? 'text-red-100' : 'text-slate-400'}`}>
+                            {reason.hint}
+                          </span>
+                        )}
+                      </span>
+                      {isSelected && <CheckCircle size={18} className="shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+           </div>
+
+           {/* Detalhe livre — só obrigatório quando o motivo é "Outro" */}
            <div className="space-y-2">
-              <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">Motivo / Observação</label>
-              <textarea 
-                placeholder={returnType === 'TOTAL' ? "Ex: Estabelecimento fechado, cliente ausente..." : "Ex: Caixa rasgada, produto vencido..."}
-                className="w-full p-4 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:border-blue-500 outline-none h-32 resize-none placeholder:text-slate-400"
+              <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase flex justify-between items-center">
+                <span>
+                  Detalhe {reasonCode === REASON_REQUIRES_DETAIL && <span className="text-red-500">*</span>}
+                </span>
+                {reasonCode !== REASON_REQUIRES_DETAIL && (
+                  <span className="text-xs font-normal lowercase text-slate-400">(opcional)</span>
+                )}
+              </label>
+              <textarea
+                placeholder={
+                  reasonCode === REASON_REQUIRES_DETAIL
+                    ? "Descreva o que aconteceu..."
+                    : "Algo a acrescentar? Ex: quem recebeu, quantidades, quem autorizou..."
+                }
+                className={`w-full p-4 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-white outline-none h-24 resize-none placeholder:text-slate-400 ${
+                  reasonCode === REASON_REQUIRES_DETAIL
+                    ? 'border-red-400 dark:border-red-700 focus:border-red-500'
+                    : 'border-gray-300 dark:border-slate-600 focus:border-blue-500'
+                }`}
                 value={failureReason}
                 onChange={e => setFailureReason(e.target.value)}
               />

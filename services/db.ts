@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
+import { REASON_LABEL } from '../constants/returnReasons';
 
 // Senha de admin padrão
 
@@ -413,20 +414,23 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   // ATUALIZADA: Agora salva o motivo também na tabela de notas (Histórico)
   // ATUALIZADA: Com "Teste da Verdade" (Debug de RLS)
   saveProof: async (proof: DeliveryProof, invoiceValueLoss?: number) => {
+    // Uma devolução é identificada por ter motivo (código OU texto) ou tipo de
+    // retorno. Não basta olhar failure_reason: desde a padronização dos motivos
+    // ele é opcional, e uma devolução sem detalhe escrito viraria "entregue".
+    const isFailure = !!(proof.failure_reason_code || proof.failure_reason || proof.return_type);
 
     console.log("--- DEBUG SAVE PROOF ---");
-    console.log("1. É falha?", !!proof.failure_reason);
-    console.log("2. Motivo recebido:", proof.failure_reason);
+    console.log("1. É falha?", isFailure);
+    console.log("2. Motivo recebido:", proof.failure_reason_code, proof.failure_reason);
     console.log("3. ID da Nota:", proof.invoice_id);
 
     // 1. Usa UPSERT para evitar erro se já existir um comprovante
     const { error } = await supabase.from('delivery_proofs').upsert(proof);
-    
+
     if (!error) {
-       const isFailure = !!proof.failure_reason;
        const newStatus = isFailure ? DeliveryStatus.FAILED : DeliveryStatus.DELIVERED;
-       
-       const updates: any = { 
+
+       const updates: any = {
            status: newStatus,
            delivered_at: proof.delivered_at
        };
@@ -434,7 +438,11 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
        // 2. Lógica Financeira e DE HISTÓRICO
        if (isFailure) {
            updates.return_value = invoiceValueLoss !== undefined ? invoiceValueLoss : 0;
-           updates.last_failure_reason = proof.failure_reason; // Copia para o histórico
+           // Grava o motivo já legível: código vira rótulo e o detalhe entra junto.
+           updates.last_failure_reason = proof.failure_reason_code
+             ? [REASON_LABEL[proof.failure_reason_code] ?? proof.failure_reason_code, proof.failure_reason]
+                 .filter(Boolean).join(' — ')
+             : proof.failure_reason;
        } else {
            updates.return_value = 0;
            // updates.last_failure_reason = null; // MANTIDO COMENTADO PARA PRESERVAR HISTÓRICO ANTIGO
@@ -490,7 +498,7 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       const chunk = invoiceIds.slice(i, i + chunkSize);
       const { data, error } = await supabase
         .from('delivery_proofs')
-        .select('invoice_id, receiver_name, delivered_at, failure_reason, notes, return_type, return_items')
+        .select('invoice_id, receiver_name, delivered_at, failure_reason, failure_reason_code, notes, return_type, return_items')
         .in('invoice_id', chunk);
 
       if (error) {

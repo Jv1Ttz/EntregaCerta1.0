@@ -100,7 +100,10 @@ export interface DeliveryProof {
   geo_long: number | null;
   delivered_at: string;
   notes?: string;
+  /** Detalhe livre do motivo. Opcional desde a padronização. */
   failure_reason?: string;
+  /** Motivo padronizado (ver constants/returnReasons). NULL nos registros antigos. */
+  failure_reason_code?: string | null;
 }
 
 /**
@@ -109,7 +112,7 @@ export interface DeliveryProof {
  */
 export type ProofSummary = Pick<
   DeliveryProof,
-  'invoice_id' | 'receiver_name' | 'delivered_at' | 'failure_reason' | 'notes' | 'return_type' | 'return_items'
+  'invoice_id' | 'receiver_name' | 'delivered_at' | 'failure_reason' | 'failure_reason_code' | 'notes' | 'return_type' | 'return_items'
 >;
 
 export interface AppNotification {

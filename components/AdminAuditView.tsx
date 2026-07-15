@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/db';
 import type { Invoice, ActivityLog, ActivityLogEventType, ProofSummary, Driver, Vehicle } from '../types';
+import { REASON_LABEL } from '../constants/returnReasons';
 import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw, TrendingDown, Download } from 'lucide-react';
 
 // ─── Configuração dos tipos de evento ───────────────────────────────────────
@@ -53,15 +54,24 @@ const getTipo = (proof?: ProofSummary): TipoKey => {
 };
 
 /**
- * O motivo confiável vive em delivery_proofs.failure_reason — invoices.last_failure_reason
- * costuma vir vazio ou só com "concluir devolução", sem o motivo original.
+ * Motivo padronizado, quando existe. Registros anteriores à padronização não têm
+ * código e caem no texto livre — o de delivery_proofs, porque
+ * invoices.last_failure_reason costuma vir vazio ou só com "concluir devolução".
  */
-const getMotivo = (inv: Invoice, proof?: ProofSummary): string =>
-  proof?.failure_reason?.trim() ||
-  proof?.notes?.trim() ||
-  inv.last_failure_reason?.trim() ||
-  inv.failure_reason?.trim() ||
-  '';
+const getMotivo = (inv: Invoice, proof?: ProofSummary): string => {
+  if (proof?.failure_reason_code) {
+    return REASON_LABEL[proof.failure_reason_code] ?? proof.failure_reason_code;
+  }
+  return proof?.failure_reason?.trim() ||
+    proof?.notes?.trim() ||
+    inv.last_failure_reason?.trim() ||
+    inv.failure_reason?.trim() ||
+    '';
+};
+
+/** Texto que o motorista escreveu além do motivo padronizado. */
+const getDetalhe = (proof?: ProofSummary): string =>
+  proof?.failure_reason_code ? (proof.failure_reason?.trim() || '') : '';
 
 /** Mesma regra do dashboard do gestor: usa return_value quando existe, senão perda total. */
 const getPerda = (inv: Invoice): number =>
@@ -124,6 +134,7 @@ const DevolucoesTab: React.FC = () => {
           proof,
           tipo: getTipo(proof),
           motivo: getMotivo(inv, proof),
+          detalhe: getDetalhe(proof),
           perda: getPerda(inv),
           data: getDataOcorrencia(inv, proof),
         };
@@ -172,7 +183,7 @@ const DevolucoesTab: React.FC = () => {
   };
 
   const exportCsv = () => {
-    const headers = ['Data', 'NF', 'Cliente', 'Motorista', 'Veículo', 'Status', 'Tipo', 'Motivo', 'Itens Devolvidos', 'Valor da Nota', 'Valor Devolvido'];
+    const headers = ['Data', 'NF', 'Cliente', 'Motorista', 'Veículo', 'Status', 'Tipo', 'Motivo', 'Detalhe', 'Itens Devolvidos', 'Valor da Nota', 'Valor Devolvido'];
     // ; como separador e BOM para o Excel pt-BR abrir com acentos e colunas corretas
     const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const lines = rows.map(r => [
@@ -184,6 +195,7 @@ const DevolucoesTab: React.FC = () => {
       STATUS_CONFIG[r.inv.status]?.label || r.inv.status,
       TIPO_CONFIG[r.tipo].label,
       r.motivo || 'MOTIVO NAO REGISTRADO NO SISTEMA',
+      r.detalhe,
       (r.proof?.return_items || '').replace(/\n/g, ' | '),
       String(r.inv.value ?? '').replace('.', ','),
       String(r.perda ?? '').replace('.', ','),
@@ -352,6 +364,9 @@ const DevolucoesTab: React.FC = () => {
                       {r.motivo
                         ? <p className="font-medium text-slate-700 dark:text-slate-200 text-xs mb-0.5 line-clamp-2" title={r.motivo}>{r.motivo}</p>
                         : <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">MOTIVO NÃO REGISTRADO</p>}
+                      {r.detalhe && (
+                        <p className="text-slate-500 dark:text-slate-400 text-xs italic leading-tight line-clamp-2" title={r.detalhe}>{r.detalhe}</p>
+                      )}
                       {/* Numa devolução total voltou tudo — listar os itens seria redundante. */}
                       {r.proof?.return_items && r.tipo !== 'TOTAL' && (
                         <p className="text-slate-500 dark:text-slate-400 text-xs whitespace-pre-line leading-tight">{r.proof.return_items}</p>
