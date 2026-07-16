@@ -306,27 +306,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
     window.open(url, '_blank');
   };
 
-  if (selectedInvoice) {
-    const vehicle = vehicles.find(v => v.id === selectedInvoice.vehicle_id);
-    return (
-      <DeliveryAction 
-        invoice={selectedInvoice} 
-        vehicle={vehicle}
-        currentGeo={currentLocation}
-        onBack={() => {
-          setSelectedInvoice(null);
-          refreshData();
-        }}
-        routeStarted={routeStarted} 
-        notify={notify}
-        removeNotification={removeNotification}
-        notifications={notifications}
-      />
-    );
-  }
-
-  const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
-  // Filtra e ORDENA por data (mais recente primeiro) 
+  // Estes hooks precisam vir ANTES de qualquer return condicional (ex.: abrir
+  // uma nota via selectedInvoice) — hook pulado entre renders quebra o React (#300).
+  // Filtra e ORDENA o histórico por data (mais recente primeiro).
   const historyInvoices = useMemo(() =>
     invoices
       .filter(i => i.status === DeliveryStatus.DELIVERED || i.status === DeliveryStatus.FAILED)
@@ -346,6 +328,27 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 
   // Volta ao topo da lista sempre que a busca muda
   useEffect(() => { setHistoryLimit(HISTORY_PAGE_SIZE); }, [historySearch]);
+
+  if (selectedInvoice) {
+    const vehicle = vehicles.find(v => v.id === selectedInvoice.vehicle_id);
+    return (
+      <DeliveryAction
+        invoice={selectedInvoice} 
+        vehicle={vehicle}
+        currentGeo={currentLocation}
+        onBack={() => {
+          setSelectedInvoice(null);
+          refreshData();
+        }}
+        routeStarted={routeStarted} 
+        notify={notify}
+        removeNotification={removeNotification}
+        notifications={notifications}
+      />
+    );
+  }
+
+  const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
 
   const visibleHistory = filteredHistory.slice(0, historyLimit);
 
