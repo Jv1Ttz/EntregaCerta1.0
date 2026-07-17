@@ -651,12 +651,15 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
       
       setLoading(true);
       try {
+        // Sobe a foto da pendência; se falhar, mantém o base64 (não perde a evidência).
+        const photoRef = (await db.uploadProofImage(invoice.id, 'foto', photo)) ?? (photo || '');
+
         const proof: DeliveryProof = {
             invoice_id: invoice.id,
             receiver_name: 'PENDÊNCIA REGISTRADA', // Nome fictício para constar
             receiver_doc: 'N/A',
-            signature_data: '', 
-            photo_url: photo || '', // Se não tiver foto, envia string vazia
+            signature_data: '',
+            photo_url: photoRef,
             photo_stub_url: '',
             // Aqui usamos as colunas que você já tem no banco:
             return_type: issueType, // Salva "AVARIA", "ITEM_FALTANTE", etc.
@@ -767,13 +770,28 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
              return;
         }
 
+        // Sobe as imagens para o Storage e guarda o caminho. Se o upload falhar
+        // (ex.: 4G ruim), cai de volta pro base64 — nunca perde o comprovante
+        // nem trava a baixa por causa de sinal.
+        let photoRef = '', stubRef = '', sigRef = '';
+        if (success) {
+            const [p, s, g] = await Promise.all([
+                db.uploadProofImage(invoice.id, 'foto', photo),
+                db.uploadProofImage(invoice.id, 'canhoto', photoStub),
+                db.uploadProofImage(invoice.id, 'assinatura', signature),
+            ]);
+            photoRef = p ?? photo;
+            stubRef  = s ?? photoStub;
+            sigRef   = g ?? signature;
+        }
+
         const proof: DeliveryProof = {
             invoice_id: invoice.id,
             receiver_name: success ? receiverName : 'N/A',
             receiver_doc: success ? receiverDoc : 'N/A',
-            signature_data: success ? signature : '',
-            photo_url: success ? photo : '',
-            photo_stub_url: success ? photoStub : '',
+            signature_data: success ? sigRef : '',
+            photo_url: success ? photoRef : '',
+            photo_stub_url: success ? stubRef : '',
            // 👇 AQUI ESTÁ A CORREÇÃO MÁGICA 👇
             // Usamos 'null' em vez de 'undefined' para LIMPAR o banco de dados
             return_type: success ? null : returnType,

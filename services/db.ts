@@ -2,6 +2,9 @@ import { supabase } from './supabaseClient';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
 import { REASON_LABEL } from '../constants/returnReasons';
 
+/** Bucket privado das imagens de comprovante (foto, canhoto, assinatura). */
+const PROOF_BUCKET = 'delivery-proofs';
+
 // Senha de admin padrão
 
 export const db = {
@@ -506,7 +509,77 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
 
   getProofByInvoiceId: async (invoiceId: string): Promise<DeliveryProof | undefined> => {
     const { data } = await supabase.from('delivery_proofs').select('*').eq('invoice_id', invoiceId).single();
-    return data as DeliveryProof || undefined;
+    if (!data) return undefined;
+
+    // Resolve os campos de imagem para algo exibível num <img src>:
+    // base64 antigo passa direto; caminho no Storage vira URL assinada.
+    // Feito só aqui porque é o único ponto que carrega as imagens para exibição
+    // — as telas (AdminView/SellerView) não precisam saber de Storage.
+    const proof = data as DeliveryProof;
+    const [photo_url, photo_stub_url, signature_data] = await Promise.all([
+      db.resolveProofImageUrl(proof.photo_url),
+      db.resolveProofImageUrl(proof.photo_stub_url),
+      db.resolveProofImageUrl(proof.signature_data),
+    ]);
+    return { ...proof, photo_url, photo_stub_url, signature_data };
+  },
+
+  /**
+   * Converte o valor guardado numa coluna de imagem em algo que um <img src>
+   * exibe. base64 (comprovantes antigos) e http (legado) passam direto;
+   * qualquer outra coisa é tratada como caminho no bucket delivery-proofs e
+   * vira uma URL assinada temporária (1h). Nunca lança — na dúvida devolve
+   * o valor original, para não quebrar a tela.
+   */
+  resolveProofImageUrl: async (value?: string | null): Promise<string> => {
+    if (!value) return '';
+    if (value.startsWith('data:') || value.startsWith('http')) return value;
+    try {
+      const { data, error } = await supabase.storage
+        .from(PROOF_BUCKET)
+        .createSignedUrl(value, 3600);
+      if (error || !data?.signedUrl) {
+        console.error('Erro ao gerar URL assinada:', error);
+        return '';
+      }
+      return data.signedUrl;
+    } catch (e) {
+      console.error('Falha ao resolver imagem do comprovante:', e);
+      return '';
+    }
+  },
+
+  /**
+   * Sobe uma imagem base64 para o Storage e devolve o CAMINHO (não a URL, que
+   * expira). Devolve null se não for base64 ou se o upload falhar — o chamador
+   * decide o fallback (ex.: manter o base64 para não perder o comprovante).
+   */
+  uploadProofImage: async (invoiceId: string, kind: string, dataUri?: string | null): Promise<string | null> => {
+    if (!dataUri) return null;
+    const m = /^data:(image\/(\w+));base64,(.*)$/s.exec(dataUri);
+    if (!m) return null; // já é caminho/URL, ou vazio
+
+    const mime = m[1];
+    const ext = m[2] === 'jpeg' ? 'jpg' : m[2];
+    try {
+      const bin = atob(m[3]);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mime });
+
+      const path = `${invoiceId}/${kind}.${ext}`;
+      const { error } = await supabase.storage
+        .from(PROOF_BUCKET)
+        .upload(path, blob, { contentType: mime, upsert: true });
+      if (error) {
+        console.error(`Erro ao subir ${kind} da nota ${invoiceId}:`, error);
+        return null;
+      }
+      return path;
+    } catch (e) {
+      console.error(`Falha no upload de ${kind}:`, e);
+      return null;
+    }
   },
 
   /**
