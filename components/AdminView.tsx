@@ -1760,7 +1760,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
             <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie recursos e distribua cargas.</p>
           </div> 
           
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          <div className="grid grid-cols-2 gap-2 w-full md:flex md:flex-wrap md:w-auto">
             <button onClick={() => { setTrackedInvoiceId(null); setShowFleetMonitor(true); }} className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800 rounded-md transition-colors shadow-sm">
               <Satellite className="h-4 w-4" /> <span className="font-medium text-sm">Monitorar Frota</span>
             </button>
@@ -2148,12 +2148,12 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           
           {/* TABELA COM SCROLL INTERNO (Resolve o Ponto 2) */}
           <div className="flex-1 min-w-0 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm text-left text-slate-600 dark:text-slate-400">
+            <table className="w-full min-w-[600px] text-xs md:text-sm text-left text-slate-600 dark:text-slate-400">
               {/* CABEÇALHO DA TABELA COM CONTRASTE (Fundo Slate-700 / Texto Branco) */}
               <thead className="text-xs text-white uppercase bg-slate-700 dark:bg-slate-900 sticky top-0 z-10 shadow-md">
                 <tr>
                   {/* Célula do Checkbox */}
-                  <th className="px-6 py-4 w-10 bg-slate-700 dark:bg-slate-900 rounded-tl-lg"> {/* rounded-tl-lg arredonda o canto esquerdo */}
+                  <th className="px-3 py-3 md:px-6 md:py-4 w-10 bg-slate-700 dark:bg-slate-900 rounded-tl-lg"> {/* rounded-tl-lg arredonda o canto esquerdo */}
                     <button onClick={toggleSelectAll} className="flex items-center justify-center text-slate-300 hover:text-white transition-colors">
                       {selectedInvoiceIds.size > 0 && selectedInvoiceIds.size >= filteredInvoices.length && filteredInvoices.length > 0 ? <CheckSquare size={18} className="text-blue-400"/> : <Square size={18}/>}
                     </button>
@@ -2161,7 +2161,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   
                   {/* Outras Colunas (Adicionei bg-slate-700 em todas para o sticky funcionar bem) */}
                  {/* CLICÁVEL: Nota/Data (Ordena pelo numero) */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('number', e as React.MouseEvent)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('number', e as React.MouseEvent)}>
       <div className="flex items-center gap-1">
         Nota / Data
         {(() => { const s = sortConfig.find(s => s.key === 'number'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2169,7 +2169,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Cliente */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('customer_name', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('customer_name', e)}>
       <div className="flex items-center gap-1">
         Cliente
         {(() => { const s = sortConfig.find(s => s.key === 'customer_name'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2177,7 +2177,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Status */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('status', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('status', e)}>
       <div className="flex items-center gap-1">
         Status
         {(() => { const s = sortConfig.find(s => s.key === 'status'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2185,7 +2185,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Valor */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('value', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('value', e)}>
       <div className="flex items-center gap-1">
         Valor
         {(() => { const s = sortConfig.find(s => s.key === 'value'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2193,7 +2193,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Realização */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('delivered_at', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('delivered_at', e)}>
       <div className="flex items-center gap-1">
         Realização
         {(() => { const s = sortConfig.find(s => s.key === 'delivered_at'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2201,7 +2201,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Motorista */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('vehicle_id', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('vehicle_id', e)}>
       <div className="flex items-center gap-1">
         Motorista
         {(() => { const s = sortConfig.find(s => s.key === 'vehicle_id'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
@@ -2209,14 +2209,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     </th>
 
     {/* CLICÁVEL: Veículo */}
-    <th className="px-6 py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('driver_id', e)}>
+    <th className="px-3 py-3 md:px-6 md:py-4 cursor-pointer hover:bg-slate-600 select-none" onClick={(e) => requestSort('driver_id', e)}>
       <div className="flex items-center gap-1">
         Veículo
         {(() => { const s = sortConfig.find(s => s.key === 'driver_id'); return s ? <>{s.direction === 'asc' ? <ArrowUp size={12}/> : <ArrowDown size={12}/>}{sortConfig.length > 1 && <span className="text-[10px] text-blue-300">{sortConfig.indexOf(s)+1}</span>}</> : null; })()}
       </div>
     </th>
                   {/* Célula de Ações (Canto direito arredondado) */}
-                  <th className="px-6 py-4 text-center bg-slate-700 dark:bg-slate-900 rounded-tr-lg font-bold tracking-wider">Ações</th>
+                  <th className="px-3 py-3 md:px-6 md:py-4 text-center bg-slate-700 dark:bg-slate-900 rounded-tr-lg font-bold tracking-wider">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
@@ -2230,12 +2230,12 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                 ) : (
                   paginatedInvoices.map((inv) => (
                     <tr key={inv.id} className={`bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-3 md:px-6 md:py-4">
                         <button onClick={() => toggleSelectOne(inv.id)} className="flex items-center justify-center text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400">
                           {selectedInvoiceIds.has(inv.id) ? <CheckSquare size={18} className="text-blue-600 dark:text-blue-400"/> : <Square size={18}/>}
                         </button>
                       </td>
-                 <td className="px-6 py-4">
+                 <td className="px-3 py-3 md:px-6 md:py-4">
     <div className="flex flex-col justify-center">
         <div className="flex items-center gap-2">
             {/* Número da Nota */}
@@ -2296,15 +2296,15 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
     </div>
 </td>
-                      <td className="px-6 py-4 max-w-[200px]">
+                      <td className="px-3 py-3 md:px-6 md:py-4 max-w-[200px]">
                         <div className="font-medium text-slate-900 dark:text-white truncate" title={inv.customer_name}>{inv.customer_name}</div>
                         <div className="text-xs text-slate-500 dark:text-slate-400 truncate" title={inv.customer_address}>{inv.customer_address}</div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-3 md:px-6 md:py-4">
                         {getStatusBadge(inv)}
                       </td>
 
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-3 py-3 md:px-6 md:py-4 whitespace-nowrap">
                         <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                           {inv.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </span>
@@ -2316,7 +2316,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       </td>
 
                       {/* 👇👇 NOVA CÉLULA DE DATA DE ENTREGA 👇👇 */}
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-3 md:px-6 md:py-4">
                         {inv.delivered_at ? (
                             <div className="flex flex-col">
                                 {/* DATA */}
@@ -2336,7 +2336,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       {/* 👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆👆 */}
                       
                       {/* Driver Selection */}
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-3 md:px-6 md:py-4">
                         <select 
                           className="bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-xs rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2"
                           value={inv.driver_id || ""}
@@ -2351,7 +2351,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       </td>
 
                       {/* Vehicle Selection */}
-                      <td className="px-6 py-4">
+                      <td className="px-3 py-3 md:px-6 md:py-4">
                         <select 
                           className="bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-xs rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2"
                           value={inv.vehicle_id || ""}
@@ -2365,7 +2365,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                         </select>
                       </td>
 
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-3 py-3 md:px-6 md:py-4 text-right">
                         <div className="relative inline-block text-left">
                           <button
                             onClick={(e) => {
@@ -3615,7 +3615,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       {viewingManualProof && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-700 overflow-hidden">
-            <div className="px-6 py-4 bg-slate-900 dark:bg-black text-white flex items-center justify-between">
+            <div className="px-3 py-3 md:px-6 md:py-4 bg-slate-900 dark:bg-black text-white flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2">
                   <FileText size={18} className="text-sky-400" />
@@ -3636,7 +3636,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </button>
             </div>
 
-            <div className="px-6 py-4 space-y-4 text-sm text-slate-700 dark:text-slate-200">
+            <div className="px-3 py-3 md:px-6 md:py-4 space-y-4 text-sm text-slate-700 dark:text-slate-200">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase">
@@ -3713,7 +3713,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       {manualSettleModal.open && manualSettleModal.invoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-200 dark:border-slate-700">
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <div className="px-3 py-3 md:px-6 md:py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 {manualSettleModal.status === 'DELIVERED' ? (
                   <CheckCircle className="text-emerald-500" />
@@ -3746,7 +3746,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </button>
             </div>
 
-            <div className="px-6 py-4 space-y-4 text-sm">
+            <div className="px-3 py-3 md:px-6 md:py-4 space-y-4 text-sm">
               <div className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
                 Use esta opção apenas quando a baixa precisar ser aplicada pelo gestor, sem ação do motorista
                 (ex.: integração externa, erro de operação, acerto manual).
