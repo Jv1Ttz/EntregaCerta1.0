@@ -1666,7 +1666,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 flex flex-col">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 flex flex-col overflow-x-hidden">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
 
       {/* Header */}
@@ -1743,7 +1743,8 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </aside>
 
       {/* ml-14 = mesma largura do sidebar colapsado (w-14 = 56px) */}
-      <main className="flex-1 ml-14 p-4 md:p-8 space-y-6 pb-20">
+      {/* min-w-0: sem isso, a tabela larga força o flex a estourar a largura da tela no mobile */}
+      <main className="flex-1 min-w-0 ml-14 p-4 md:p-8 space-y-6 pb-20">
 
         {/* ===== MÓDULO ETIQUETAS ===== */}
         {activeSidebarSection === 'etiquetas' && (
@@ -2146,8 +2147,8 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           </div>
           
           {/* TABELA COM SCROLL INTERNO (Resolve o Ponto 2) */}
-          <div className="flex-1 overflow-auto"> 
-            <table className="w-full text-sm text-left text-slate-600 dark:text-slate-400">
+          <div className="flex-1 min-w-0 overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm text-left text-slate-600 dark:text-slate-400">
               {/* CABEÇALHO DA TABELA COM CONTRASTE (Fundo Slate-700 / Texto Branco) */}
               <thead className="text-xs text-white uppercase bg-slate-700 dark:bg-slate-900 sticky top-0 z-10 shadow-md">
                 <tr>
