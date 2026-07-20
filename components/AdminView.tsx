@@ -1665,6 +1665,128 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     );
   };
 
+  // Menu de ações por nota — reutilizado na tabela (desktop) e nos cards (mobile).
+  const renderRowActions = (inv: Invoice) => (
+    <div className="relative inline-block text-left">
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpenActionsRow((prev) => (prev === inv.id ? null : inv.id));
+        }}
+        className="inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+        title="Mais ações"
+      >
+        <MoreVertical size={18} />
+      </button>
+
+      {openActionsRow === inv.id && (
+        <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-lg shadow-lg bg-white dark:bg-slate-800 ring-1 ring-black/5 dark:ring-slate-700 z-30">
+          <div className="py-1 text-sm text-slate-700 dark:text-slate-200">
+            {/* Ações de Devolução */}
+            {inv.status === 'FAILED' && !inv.return_final_status && (
+              <>
+                <button
+                  onClick={() => handleRedeliver(inv)}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-300"
+                >
+                  <RefreshCw size={16} />
+                  <span>Disponibilizar para Reentrega</span>
+                </button>
+                <button
+                  onClick={() => openFinalizeModal(inv, 'CONCLUDED')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
+                >
+                  <CheckCircle size={16} />
+                  <span>Concluir Devolução</span>
+                </button>
+                <button
+                  onClick={() => openFinalizeModal(inv, 'CANCELLED')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
+                >
+                  <XCircle size={16} />
+                  <span>Cancelar Devolução</span>
+                </button>
+              </>
+            )}
+
+            {/* Reentrega / Financeiro */}
+            {inv.status === 'PENDING' && (inv.delivery_attempts || 0) > 0 && (
+              <button
+                onClick={() => handleEditValue(inv)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-green-50 dark:hover:bg-green-900/40 text-green-600 dark:text-green-300"
+              >
+                <DollarSign size={16} />
+                <span>Editar Valor de Reentrega</span>
+              </button>
+            )}
+
+            {/* Baixa manual pelo gestor */}
+            {(inv.status === 'PENDING' || inv.status === 'IN_PROGRESS' || inv.status === 'ISSUE') && (
+              <>
+                <button
+                  onClick={() => openManualSettleModal(inv, 'DELIVERED')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
+                >
+                  <CheckCircle size={16} />
+                  <span>Baixa manual como Entregue</span>
+                </button>
+                <button
+                  onClick={() => openManualSettleModal(inv, 'FAILED')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
+                >
+                  <AlertTriangle size={16} />
+                  <span>Baixa manual como Devolvida</span>
+                </button>
+              </>
+            )}
+
+            {/* Comprovante / Pendência */}
+            {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
+              <button
+                onClick={() => handleViewProof(inv)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-300"
+              >
+                <Eye size={16} />
+                <span>Ver Detalhes / Comprovante</span>
+              </button>
+            )}
+
+            {/* PDF da Nota */}
+            {inv.pdf_url && (
+              <button
+                onClick={() => window.open(inv.pdf_url, '_blank')}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
+              >
+                <FileText size={16} />
+                <span>Visualizar PDF da Nota</span>
+              </button>
+            )}
+
+            {/* Rastrear no SSW — somente para TRANSPORTADORA */}
+            {drivers.find(d => d.id === inv.driver_id)?.name?.toUpperCase() === 'TRANSPORTADORA' && (
+              <button
+                onClick={() => { openSSWTracking(inv); setOpenActionsRow(null); }}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-50 dark:hover:bg-sky-900/40 text-sky-600 dark:text-sky-300"
+              >
+                <ExternalLink size={16} />
+                <span>Rastrear no SSW</span>
+              </button>
+            )}
+
+            {/* Excluir */}
+            <button
+              onClick={() => handleDeleteInvoice(inv.id)}
+              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300 border-t border-slate-100 dark:border-slate-700 mt-1"
+            >
+              <Trash2 size={16} />
+              <span>Excluir Nota</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 transition-colors duration-300 flex flex-col overflow-x-hidden">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
@@ -2146,8 +2268,8 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
             )}
           </div>
           
-          {/* TABELA COM SCROLL INTERNO (Resolve o Ponto 2) */}
-          <div className="flex-1 min-w-0 overflow-x-auto">
+          {/* TABELA (desktop) — escondida no mobile, que usa cards abaixo */}
+          <div className="hidden md:block flex-1 min-w-0 overflow-x-auto">
             <table className="w-full min-w-[600px] text-xs md:text-sm text-left text-slate-600 dark:text-slate-400">
               {/* CABEÇALHO DA TABELA COM CONTRASTE (Fundo Slate-700 / Texto Branco) */}
               <thead className="text-xs text-white uppercase bg-slate-700 dark:bg-slate-900 sticky top-0 z-10 shadow-md">
@@ -2366,130 +2488,86 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       </td>
 
                       <td className="px-3 py-3 md:px-6 md:py-4 text-right">
-                        <div className="relative inline-block text-left">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpenActionsRow((prev) => (prev === inv.id ? null : inv.id));
-                            }}
-                            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                            title="Mais ações"
-                          >
-                            <MoreVertical size={18} />
-                          </button>
-
-                          {openActionsRow === inv.id && (
-                            <div className="origin-top-right absolute right-0 mt-2 w-56 rounded-lg shadow-lg bg-white dark:bg-slate-800 ring-1 ring-black/5 dark:ring-slate-700 z-30">
-                              <div className="py-1 text-sm text-slate-700 dark:text-slate-200">
-                                {/* Ações de Devolução */}
-                                {inv.status === 'FAILED' && !inv.return_final_status && (
-                                  <>
-                                    <button
-                                      onClick={() => handleRedeliver(inv)}
-                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-300"
-                                    >
-                                      <RefreshCw size={16} />
-                                      <span>Disponibilizar para Reentrega</span>
-                                    </button>
-                                    <button
-                                      onClick={() => openFinalizeModal(inv, 'CONCLUDED')}
-                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
-                                    >
-                                      <CheckCircle size={16} />
-                                      <span>Concluir Devolução</span>
-                                    </button>
-                                    <button
-                                      onClick={() => openFinalizeModal(inv, 'CANCELLED')}
-                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300"
-                                    >
-                                      <XCircle size={16} />
-                                      <span>Cancelar Devolução</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {/* Reentrega / Financeiro */}
-                                {inv.status === 'PENDING' && (inv.delivery_attempts || 0) > 0 && (
-                                  <button
-                                    onClick={() => handleEditValue(inv)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-green-50 dark:hover:bg-green-900/40 text-green-600 dark:text-green-300"
-                                  >
-                                    <DollarSign size={16} />
-                                    <span>Editar Valor de Reentrega</span>
-                                  </button>
-                                )}
-
-                                {/* Baixa manual pelo gestor */}
-                                {(inv.status === 'PENDING' || inv.status === 'IN_PROGRESS' || inv.status === 'ISSUE') && (
-                                  <>
-                                    <button
-                                      onClick={() => openManualSettleModal(inv, 'DELIVERED')}
-                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300"
-                                    >
-                                      <CheckCircle size={16} />
-                                      <span>Baixa manual como Entregue</span>
-                                    </button>
-                                    <button
-                                      onClick={() => openManualSettleModal(inv, 'FAILED')}
-                                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
-                                    >
-                                      <AlertTriangle size={16} />
-                                      <span>Baixa manual como Devolvida</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {/* Comprovante / Pendência */}
-                                {(inv.status === 'DELIVERED' || inv.status === 'FAILED' || inv.status === 'ISSUE') && (
-                                  <button
-                                    onClick={() => handleViewProof(inv)}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/40 text-blue-600 dark:text-blue-300"
-                                  >
-                                    <Eye size={16} />
-                                    <span>Ver Detalhes / Comprovante</span>
-                                  </button>
-                                )}
-
-                                {/* PDF da Nota */}
-                                {inv.pdf_url && (
-                                  <button
-                                    onClick={() => window.open(inv.pdf_url, '_blank')}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300"
-                                  >
-                                    <FileText size={16} />
-                                    <span>Visualizar PDF da Nota</span>
-                                  </button>
-                                )}
-
-                                {/* Rastrear no SSW — somente para TRANSPORTADORA */}
-                                {drivers.find(d => d.id === inv.driver_id)?.name?.toUpperCase() === 'TRANSPORTADORA' && (
-                                  <button
-                                    onClick={() => { openSSWTracking(inv); setOpenActionsRow(null); }}
-                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-sky-50 dark:hover:bg-sky-900/40 text-sky-600 dark:text-sky-300"
-                                  >
-                                    <ExternalLink size={16} />
-                                    <span>Rastrear no SSW</span>
-                                  </button>
-                                )}
-
-                                {/* Excluir */}
-                                <button
-                                  onClick={() => handleDeleteInvoice(inv.id)}
-                                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-red-50 dark:hover:bg-red-900/40 text-red-600 dark:text-red-300 border-t border-slate-100 dark:border-slate-700 mt-1"
-                                >
-                                  <Trash2 size={16} />
-                                  <span>Excluir Nota</span>
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        {renderRowActions(inv)}
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* CARDS (mobile) — cada nota completa num cartão, sem scroll lateral */}
+          <div className="md:hidden">
+            {sortedInvoices.length === 0 ? (
+              <div className="px-4 py-12 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center gap-2">
+                <Search size={32} className="opacity-20" />
+                <p>Nenhuma nota encontrada com os filtros atuais.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                {paginatedInvoices.map((inv) => (
+                  <div key={inv.id} className={`p-4 ${selectedInvoiceIds.has(inv.id) ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-white dark:bg-slate-800'}`}>
+                    {/* Topo: seleção + NF/data + status + ações */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <button onClick={() => toggleSelectOne(inv.id)} className="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400">
+                          {selectedInvoiceIds.has(inv.id) ? <CheckSquare size={18} className="text-blue-600 dark:text-blue-400" /> : <Square size={18} />}
+                        </button>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 dark:text-white leading-tight">NF {inv.number}-{inv.series}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{new Date(inv.created_at).toLocaleDateString('pt-BR')}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {getStatusBadge(inv)}
+                        {renderRowActions(inv)}
+                      </div>
+                    </div>
+
+                    {/* Cliente */}
+                    <div className="mt-2 pl-7">
+                      <div className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate" title={inv.customer_name}>{inv.customer_name}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1" title={inv.customer_address}>{inv.customer_address}</div>
+                    </div>
+
+                    {/* Valor + realização */}
+                    <div className="mt-2 pl-7 flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {inv.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                      {inv.delivered_at && (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                          {new Date(inv.delivered_at).toLocaleDateString('pt-BR')} {new Date(inv.delivered_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Motorista + Veículo */}
+                    <div className="mt-3 pl-7 grid grid-cols-2 gap-2">
+                      <select
+                        className="bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-xs rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full p-2"
+                        value={inv.driver_id || ""}
+                        onChange={(e) => handleLogisticsUpdate(inv.id, 'driver', e.target.value)}
+                        disabled={inv.status === DeliveryStatus.DELIVERED}
+                      >
+                        <option value="">{drivers.length === 0 ? 'Sem motoristas' : 'Motorista...'}</option>
+                        {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                      <select
+                        className="bg-slate-50 dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white text-xs rounded-lg focus:ring-blue-500 focus:border-blue-500 w-full p-2"
+                        value={inv.vehicle_id || ""}
+                        onChange={(e) => handleLogisticsUpdate(inv.id, 'vehicle', e.target.value)}
+                        disabled={inv.status === DeliveryStatus.DELIVERED}
+                      >
+                        <option value="">{vehicles.length === 0 ? 'Sem veículos' : 'Veículo...'}</option>
+                        {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate} - {v.model}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Paginação — exibição fatiada; filtros e busca atuam sobre todas as notas */}
