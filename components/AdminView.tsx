@@ -216,6 +216,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   }>({ open: false, invoice: null, loading: false, events: [], raw: null, error: null });
 
   const [activeSidebarSection, setActiveSidebarSection] = useState<'main' | 'etiquetas'>('main');
+  // Aba ativa da navegação inferior no MOBILE (no desktop tudo aparece junto).
+  const [mobileTab, setMobileTab] = useState<'inicio' | 'cargas' | 'mais'>('inicio');
   // Modal de baixa manual (gestor)
   const [manualSettleModal, setManualSettleModal] = useState<{
     open: boolean;
@@ -1828,7 +1830,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       <div className="flex flex-1">
 
         {/* Sidebar — fixed para não sumir ao rolar a página */}
-        <aside className="group fixed top-[57px] left-0 h-[calc(100vh-57px)] w-14 hover:w-52 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0 z-20 shadow-sm">
+        <aside className="group fixed top-[57px] left-0 h-[calc(100vh-57px)] w-14 hover:w-52 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-700 transition-all duration-300 ease-in-out overflow-hidden flex flex-col shrink-0 z-20 shadow-sm max-md:hidden">
           <nav className="flex flex-col gap-1 p-2 pt-4">
             <button
               onClick={() => setActiveSidebarSection('main')}
@@ -1864,9 +1866,9 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
           </nav>
         </aside>
 
-      {/* ml-14 = mesma largura do sidebar colapsado (w-14 = 56px) */}
+      {/* Desktop: margem do sidebar (56px). Mobile: sem sidebar, margem 0 + espaço p/ nav inferior. */}
       {/* min-w-0: sem isso, a tabela larga força o flex a estourar a largura da tela no mobile */}
-      <main className="flex-1 min-w-0 ml-14 p-4 md:p-8 space-y-6 pb-20">
+      <main className="flex-1 min-w-0 ml-0 md:ml-14 p-4 md:p-8 space-y-6 pb-24 md:pb-20">
 
         {/* ===== MÓDULO ETIQUETAS ===== */}
         {activeSidebarSection === 'etiquetas' && (
@@ -1875,8 +1877,8 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
         {activeSidebarSection === 'main' && (<>
 
-        {/* Actions Bar */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+        {/* Actions Bar — no mobile aparece só na aba "Mais" */}
+        <div className={`flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm ${mobileTab === 'mais' ? '' : 'max-md:hidden'}`}>
           <div>
             <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Painel de Controle</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">Gerencie recursos e distribua cargas.</p>
@@ -1907,12 +1909,21 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               <UserPlus className="h-4 w-4" /> <span className="font-medium text-sm">Gerir Motoristas</span>
             </button>
 
-           <button 
-              onClick={() => setShowImportModal(true)} 
+           <button
+              onClick={() => setShowImportModal(true)}
               className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md cursor-pointer transition-colors shadow-sm"
             >
               <UploadCloud className="h-4 w-4" />
               <span className="font-medium text-sm">Importar XML</span>
+            </button>
+
+            {/* Etiquetas — no desktop mora na sidebar; no mobile aparece aqui na aba "Mais" */}
+            <button
+              onClick={() => setActiveSidebarSection('etiquetas')}
+              className="md:hidden flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm"
+            >
+              <Tag className="h-4 w-4" />
+              <span className="font-medium text-sm">Etiquetas</span>
             </button>
           </div>
         </div>
@@ -1929,7 +1940,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
         {/* --- FILTRO GERAL DO DASHBOARD (VISÃO GERAL) --- */}
         {/* Fica logo acima dos cards para fácil acesso */}
-        <div className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in slide-in-from-top-2">
+        <div className={`bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 animate-in slide-in-from-top-2 ${mobileTab === 'inicio' ? '' : 'max-md:hidden'}`}>
             <div>
                <h2 className="font-bold text-slate-800 dark:text-white text-lg flex items-center gap-2">
                   <LayoutDashboard className="text-blue-600" /> Filtro Geral Dashboard
@@ -1972,7 +1983,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
 
         {/* --- 1. CARDS DE STATUS (MANTIDO) --- */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+        <div className={`grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6 ${mobileTab === 'inicio' ? '' : 'max-md:hidden'}`}>
            {[
              { label: 'Faturadas', count: countPending, icon: Clock, color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
              { label: 'Em Rota', count: countProgress, icon: Navigation2, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
@@ -1993,7 +2004,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
         </div>
 
         {/* --- 2. DASHBOARD FINANCEIRO + RANKING (RESTAURADO) --- */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className={`grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 ${mobileTab === 'inicio' ? '' : 'max-md:hidden'}`}>
           
           {/* Card 1: Valor Entregue */}
           <div className="bg-white dark:bg-slate-800 p-6 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden group">
@@ -2073,7 +2084,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
         {/* Bulk Assignment Bar */}
         {selectedInvoiceIds.size > 0 && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className={`bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4 rounded-lg shadow-sm animate-in fade-in slide-in-from-top-2 ${mobileTab === 'cargas' ? '' : 'max-md:hidden'}`}>
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <CheckSquare className="text-blue-600 dark:text-blue-400" />
@@ -2120,7 +2131,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
         {/* Invoices Table */}
        {/* --- TABELA DE GESTÃO COM FILTROS AVANÇADOS --- */}
-        <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col h-[calc(100vh-80px)] text-sm"> 
+        <div className={`bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col md:h-[calc(100vh-80px)] text-sm ${mobileTab === 'cargas' ? '' : 'max-md:hidden'}`}>
           {/* h-[calc...] faz a tabela ocupar o resto da tela sem ser infinita */}
 
           {/* CABEÇALHO E FILTROS */}
@@ -2619,6 +2630,37 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
       </main>
       </div>
+
+      {/* Navegação inferior — só no MOBILE (substitui a sidebar) */}
+      <nav
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 grid grid-cols-4 shadow-[0_-4px_16px_rgba(0,0,0,0.06)]"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <button
+          onClick={() => { setActiveSidebarSection('main'); setMobileTab('inicio'); }}
+          className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${activeSidebarSection === 'main' && mobileTab === 'inicio' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <LayoutDashboard size={20} /> Início
+        </button>
+        <button
+          onClick={() => { setActiveSidebarSection('main'); setMobileTab('cargas'); }}
+          className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${activeSidebarSection === 'main' && mobileTab === 'cargas' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <Package size={20} /> Cargas
+        </button>
+        <button
+          onClick={() => { setTrackedInvoiceId(null); setShowFleetMonitor(true); }}
+          className="flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 transition-colors"
+        >
+          <Satellite size={20} /> Frota
+        </button>
+        <button
+          onClick={() => { setActiveSidebarSection('main'); setMobileTab('mais'); }}
+          className={`flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${activeSidebarSection === 'main' && mobileTab === 'mais' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'}`}
+        >
+          <MoreVertical size={20} /> Mais
+        </button>
+      </nav>
 
   {processingKey && (
         <div className="fixed inset-0 z-[60] flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
