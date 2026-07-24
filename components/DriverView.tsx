@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon } from 'lucide-react';
+import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon, Flag, Clock } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
-import { getReasonsFor, REASON_REQUIRES_DETAIL } from '../constants/returnReasons';
+import { getReasonsFor, REASON_REQUIRES_DETAIL, NAO_ENTREGUE_REASONS } from '../constants/returnReasons';
 import { registerPlugin } from '@capacitor/core';
 // Importamos o TIPO para o TypeScript entender os comandos
 import type { BackgroundGeolocationPlugin } from '@capacitor-community/background-geolocation';
@@ -121,15 +121,9 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
  
   // 👆 FIM DA CONFIGURAÇÃO DO TOAST 👆
   
-  // --- LÓGICA DE ESTADO (Persistência Diária) ---
-  const [routeStarted, setRouteStarted] = useState(() => {
-    if (typeof window !== 'undefined') {
-        const savedDate = localStorage.getItem(`route_started_date_${driverId}`);
-        const today = new Date().toDateString();
-        return savedDate === today;
-    }
-    return false;
-  });
+  // Fonte de verdade da rota ativa: o banco (drivers.route_started_at), não mais
+  // o localStorage — assim sobrevive à troca de celular e à virada do dia.
+  const routeStarted = !!driver?.route_started_at;
 
   const [isTracking, setIsTracking] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
@@ -193,10 +187,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const handleStartRoute = async () => {
     if(confirm("Confirmar saída para entrega? O gestor será notificado e o GPS ativado.")) {
         await db.startRoute(driverId);
-        const today = new Date().toDateString();
-        localStorage.setItem(`route_started_date_${driverId}`, today);
-        setRouteStarted(true);
-        refreshData();
+        await refreshData(); // recarrega o motorista com route_started_at setado (liga o GPS)
 
         // Orienta o motorista a desativar otimização de bateria para garantir GPS contínuo
         notify(
@@ -204,6 +195,17 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
             "Para o rastreio funcionar com a tela desligada, vá em Configurações > Aplicativos > EntregaCerta > Bateria e selecione 'Sem restrições'.",
             "INFO"
         );
+    }
+  };
+
+  const handleFinishRoute = async () => {
+    if (confirm("Finalizar a rota de hoje? O gestor será notificado e o rastreio desligado.")) {
+        await db.finishRoute(driverId);
+        // Desliga rastreio e mantém-tela-ativa imediatamente
+        await stopTracking();
+        if (wakeLockRef.current) { try { await wakeLockRef.current.release(); } catch {} wakeLockRef.current = null; }
+        await refreshData(); // route_started_at volta a null → routeStarted vira false
+        notify("Rota Finalizada", "Rastreio desligado. Bom descanso!", "SUCCESS");
     }
   };
 
@@ -349,6 +351,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   }
 
   const pendingInvoices = invoices.filter(i => i.status !== DeliveryStatus.DELIVERED && i.status !== DeliveryStatus.FAILED);
+  // Notas ainda "em rota" (sem destino). Só se pode finalizar quando chega a zero.
+  const inProgressCount = invoices.filter(i => i.status === DeliveryStatus.IN_PROGRESS).length;
 
   const visibleHistory = filteredHistory.slice(0, historyLimit);
 
@@ -406,6 +410,28 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
               <Navigation2 size={24} />
               <span className="font-bold text-lg">INICIAR ROTA</span>
             </button>
+        </div>
+        )}
+
+        {routeStarted && (
+        <div className="grid grid-cols-1 gap-2 animate-in fade-in slide-in-from-top-4">
+            <button
+              onClick={handleFinishRoute}
+              disabled={inProgressCount > 0}
+              className={`p-4 rounded-xl flex items-center justify-center gap-2 transition-transform font-bold text-lg ${
+                inProgressCount > 0
+                  ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-800 dark:bg-slate-700 text-white shadow-lg active:scale-95'
+              }`}
+            >
+              <Flag size={22} />
+              <span>FINALIZAR ROTA</span>
+            </button>
+            {inProgressCount > 0 && (
+              <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                Dê um destino às {inProgressCount} entrega(s) restante(s) para poder finalizar.
+              </p>
+            )}
         </div>
         )}
 
@@ -558,7 +584,8 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
 // -- DELIVERY ACTION --
 const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo: {lat: number, lng: number} | null, onBack: () => void, routeStarted: boolean, notify: (title: string, message: string, type?: 'SUCCESS' | 'WARNING' | 'INFO') => void, notifications: AppNotification[], removeNotification: (id: string) => void }> = ({ invoice, vehicle, currentGeo, onBack, routeStarted, notify, notifications, removeNotification }) => {
   // Estados de Controle
-  const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'RETURN' | 'SUCCESS' | 'ISSUE'>('DETAILS');
+  const [step, setStep] = useState<'DETAILS' | 'PROOF' | 'RETURN' | 'SUCCESS' | 'ISSUE' | 'NOT_DELIVERED'>('DETAILS');
+  const [notDeliveredReason, setNotDeliveredReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [frozenGeo, setFrozenGeo] = useState<{lat: number, lng: number} | null>(currentGeo);
   const [issueType, setIssueType] = useState('AVARIA'); // Valor padrão
@@ -638,6 +665,21 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         setLoading(false);
       }
     }
+  };
+
+  const submitNotDelivered = async () => {
+      if (!notDeliveredReason) return notify("Atenção", "Escolha o motivo.", "WARNING");
+      setLoading(true);
+      try {
+        await db.markNotDelivered(invoice.id, notDeliveredReason);
+        notify("Registrado", "Nota devolvida à fila. Ficará disponível para uma próxima rota.", "SUCCESS");
+        onBack();
+      } catch (e) {
+        console.error(e);
+        notify("Erro", "Não foi possível registrar. Tente de novo.", "WARNING");
+      } finally {
+        setLoading(false);
+      }
   };
 
   const submitIssue = async () => {
@@ -825,6 +867,56 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         <h1 className="text-3xl font-black mb-2">Sucesso!</h1>
         <p className="text-green-100 text-lg mb-8">Informações sincronizadas.</p>
         <button onClick={onBack} className="w-full bg-white text-green-600 font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-transform">Voltar para Rota</button>
+        <ToastContainer notifications={notifications} onRemove={removeNotification} />
+      </div>
+    );
+  }
+
+  // --- TELA "NÃO ENTREGUE HOJE" ---
+  if (step === 'NOT_DELIVERED') {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-slate-900 flex flex-col transition-colors duration-300">
+        <div className="bg-white dark:bg-slate-800 p-4 shadow-sm border-b dark:border-slate-700 flex items-center gap-2 sticky top-0 z-10">
+          <button onClick={() => setStep('DETAILS')} className="p-2 -ml-2 text-gray-600 dark:text-slate-300"><ChevronLeft /></button>
+          <h2 className="font-bold text-lg text-gray-800 dark:text-white">Não entregue hoje</h2>
+        </div>
+
+        <div className="flex-1 p-6 space-y-5 overflow-y-auto">
+          <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-lg text-slate-600 dark:text-slate-300 text-sm border border-slate-200 dark:border-slate-700">
+            A nota <strong>NF {invoice.number}</strong> volta para a fila e fica disponível para uma próxima rota. Continua atribuída a você. Não é devolução nem pendência — só não deu pra entregar hoje.
+          </div>
+
+          <div className="space-y-3">
+            <label className="text-sm font-bold text-gray-500 dark:text-slate-400 uppercase">Por que não foi entregue? <span className="text-red-500">*</span></label>
+            <div className="grid grid-cols-1 gap-2">
+              {NAO_ENTREGUE_REASONS.map(r => {
+                const sel = notDeliveredReason === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => setNotDeliveredReason(r)}
+                    className={`p-3 rounded-lg border text-left font-bold text-sm transition-all flex items-center justify-between ${
+                      sel
+                        ? 'bg-slate-700 text-white border-slate-700 shadow-md dark:bg-slate-600 dark:border-slate-600'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-gray-300 dark:border-slate-600'
+                    }`}
+                  >
+                    {r}
+                    {sel && <CheckCircle size={18} className="shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t dark:border-slate-700 sticky bottom-0 z-50">
+          <button onClick={submitNotDelivered} disabled={loading}
+            className="w-full bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white font-bold py-4 rounded-xl text-lg shadow-lg active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-2">
+            {loading ? <Loader2 className="animate-spin" /> : <Clock size={20} />}
+            Devolver à fila
+          </button>
+        </div>
         <ToastContainer notifications={notifications} onRemove={removeNotification} />
       </div>
     );
@@ -1261,6 +1353,7 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
         
         {!isReadOnly ? (
             // MODO OPERAÇÃO: Botões normais de trabalho
+            <div className="space-y-2.5">
             <div className="flex gap-3">
                 <button onClick={() => {
                     if (!routeStarted) {
@@ -1293,8 +1386,17 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                     <AlertOctagon size={18} />
                     Pendência
                 </button>
+            </div>
 
-
+            {/* Não entregue hoje — volta a nota pra fila sem falsificar status */}
+            <button onClick={() => {
+                if (!routeStarted) return notify("Atenção", "Inicie a rota primeiro.", "WARNING");
+                setStep('NOT_DELIVERED');
+            }}
+            className="w-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-sm flex items-center justify-center gap-2">
+                <Clock size={16} />
+                Não entregue hoje
+            </button>
             </div>
         ) : (
             // MODO LEITURA: Apenas visualização

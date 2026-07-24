@@ -31,6 +31,8 @@ export interface Driver {
   id: string;
   name: string;
   password?: string; // Added password field (optional for backward compatibility with old data)
+  /** Início da rota ativa. null/undefined = não está em rota. Fonte de verdade do "rota ativa". */
+  route_started_at?: string | null;
   last_location?: {
     lat: number;
     lng: number;

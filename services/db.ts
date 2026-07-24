@@ -408,34 +408,109 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   },
 
   startRoute: async (driverId: string) => {
-    // 1. Conta quantas entregas pendentes existem para notificar depois
+    // 1. Coloca em rota tudo que estava PENDENTE deste motorista
+    await supabase
+      .from('invoices')
+      .update({ status: 'IN_PROGRESS' })
+      .eq('driver_id', driverId)
+      .eq('status', 'PENDING');
+
+    // 2. Marca a rota como ATIVA (fonte de verdade, não mais o localStorage)
+    await supabase
+      .from('drivers')
+      .update({ route_started_at: new Date().toISOString() })
+      .eq('id', driverId);
+
+    // 3. Notifica o gestor com o total que está em rota agora
     const { count } = await supabase
       .from('invoices')
       .select('*', { count: 'exact', head: true })
       .eq('driver_id', driverId)
-      .eq('status', 'PENDING');
+      .eq('status', 'IN_PROGRESS');
 
-    if (count && count > 0) {
-        // 2. Atualiza TUDO que é 'PENDING' para 'IN_PROGRESS' de uma vez
-        const { error } = await supabase
+    const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
+    const driverName = driver?.name || 'Motorista';
+    await db.addNotification(
+      'ADMIN',
+      'Início de Rota',
+      `${driverName} iniciou a rota com ${count || 0} entrega(s).`,
+      'INFO'
+    );
+  },
+
+  /**
+   * Encerra a rota do motorista. Qualquer nota ainda IN_PROGRESS volta para
+   * PENDING mantendo motorista/veículo (rede de segurança — no fluxo normal o
+   * motorista já resolveu todas antes de finalizar). Zera route_started_at,
+   * notifica o gestor com o resumo do dia e registra no log.
+   */
+  finishRoute: async (driverId: string, byGestor = false) => {
+    const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
+    const driverName = driver?.name || 'Motorista';
+
+    // Notas que ainda estavam em rota (não resolvidas) voltam para a fila
+    const { count: aindaEmRota } = await supabase
+      .from('invoices')
+      .select('*', { count: 'exact', head: true })
+      .eq('driver_id', driverId)
+      .eq('status', 'IN_PROGRESS');
+
+    if (aindaEmRota && aindaEmRota > 0) {
+      await supabase
         .from('invoices')
-        .update({ status: 'IN_PROGRESS' })
+        .update({ status: 'PENDING' })  // mantém driver_id e vehicle_id
         .eq('driver_id', driverId)
-        .eq('status', 'PENDING');
-        
-        if (!error) {
-             // 3. Notifica o Gestor
-             const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
-             const driverName = driver?.name || 'Motorista';
-             
-             await db.addNotification(
-                'ADMIN', 
-                'Início de Rota', 
-                `${driverName} iniciou a rota com ${count} entregas.`, 
-                'INFO'
-             );
-        }
+        .eq('status', 'IN_PROGRESS');
     }
+
+    // Encerra a rota
+    await supabase
+      .from('drivers')
+      .update({ route_started_at: null })
+      .eq('id', driverId);
+
+    // Resumo do dia (entregas finalizadas hoje por este motorista)
+    const hoje = new Date().toISOString().slice(0, 10);
+    const { count: entreguesHoje } = await supabase
+      .from('invoices')
+      .select('*', { count: 'exact', head: true })
+      .eq('driver_id', driverId)
+      .eq('status', 'DELIVERED')
+      .gte('delivered_at', `${hoje}T00:00:00`);
+
+    const restantes = aindaEmRota || 0;
+    const origem = byGestor ? ' (pelo gestor)' : '';
+    await db.addNotification(
+      'ADMIN',
+      'Rota Finalizada',
+      `${driverName} finalizou a rota${origem}. ${entreguesHoje || 0} entregue(s) hoje` +
+        (restantes > 0 ? `, ${restantes} voltaram para a fila.` : '.'),
+      'INFO'
+    );
+    await db.addLog('STATUS_CHANGE', `${driverName} finalizou a rota${origem}` +
+      (restantes > 0 ? ` — ${restantes} nota(s) voltaram para a fila` : ''));
+  },
+
+  /**
+   * "Não entregue hoje": a nota não foi realizada (nem entregue, nem devolvida,
+   * nem pendência) e volta para a fila, mantendo o motorista/veículo. O motivo
+   * fica registrado no log. Não confundir com devolução/pendência.
+   */
+  markNotDelivered: async (invoiceId: string, reason: string) => {
+    const { data: inv } = await supabase.from('invoices').select('number, driver_id').eq('id', invoiceId).single();
+
+    await supabase
+      .from('invoices')
+      .update({ status: 'PENDING' })  // volta para a fila, mantém atribuição
+      .eq('id', invoiceId);
+
+    let driverName = '';
+    if (inv?.driver_id) {
+      const { data: drv } = await supabase.from('drivers').select('name').eq('id', inv.driver_id).single();
+      driverName = drv?.name || '';
+    }
+    await db.addLog('STATUS_CHANGE',
+      `NF ${inv?.number || invoiceId} não entregue hoje${driverName ? ` (${driverName})` : ''} — Motivo: ${reason}`);
   },
   
   // ATUALIZADA: Agora aceita o segundo argumento 'invoiceValueLoss'

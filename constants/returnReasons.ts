@@ -19,6 +19,19 @@ export interface ReturnReason {
   hint?: string;
 }
 
+/**
+ * Motivos de "Não entregue hoje" — a nota não foi realizada (nem entregue, nem
+ * devolvida, nem pendência) e volta para a fila. Não confundir com devolução:
+ * aqui a mercadoria não chegou a ser recusada, só não deu pra entregar hoje.
+ */
+export const NAO_ENTREGUE_REASONS: string[] = [
+  'Sem tempo / fim do expediente',
+  'Cliente fechado / ausente',
+  'Endereço não localizado',
+  'Não coube no veículo',
+  'Outro motivo',
+];
+
 /** Devolução total: a nota inteira volta. */
 export const RETURN_REASONS_TOTAL: ReturnReason[] = [
   { code: 'CLIENTE_RECUSOU',     label: 'Cliente recusou a mercadoria' },

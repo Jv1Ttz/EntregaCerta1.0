@@ -3,7 +3,7 @@ import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight, Flag } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 import { LabelsView } from './LabelsView';
@@ -1302,6 +1302,17 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       title: 'Remover Motorista?',
       message: 'Ao remover este motorista, todas as entregas vinculadas a ele voltarão para o status "Faturado".'
     });
+  };
+
+  // Finaliza a rota de um motorista remotamente (caso "foi embora e esqueceu").
+  const handleFinishDriverRoute = async (d: Driver) => {
+    const emRota = invoices.filter(i => i.driver_id === d.id && i.status === 'IN_PROGRESS').length;
+    const msg = emRota > 0
+      ? `Finalizar a rota de ${d.name}? ${emRota} entrega(s) não realizada(s) voltarão para a fila.`
+      : `Finalizar a rota de ${d.name}?`;
+    if (!window.confirm(msg)) return;
+    await db.finishRoute(d.id, true);
+    await refreshData();
   };
 
   const handleCreateVehicle = async (e: React.FormEvent) => {
@@ -3987,19 +3998,35 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       drivers.map(d => (
                         <div key={d.id} className="bg-white dark:bg-slate-800 p-3 rounded border border-slate-200 dark:border-slate-600 flex justify-between items-center shadow-sm">
                            <div>
-                              <span className="font-medium text-slate-800 dark:text-white block">{d.name}</span>
+                              <span className="font-medium text-slate-800 dark:text-white block flex items-center gap-2">
+                                {d.name}
+                                {d.route_started_at && (
+                                  <span className="text-[10px] font-bold uppercase bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-full">Em rota</span>
+                                )}
+                              </span>
                               <div className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
                                 <KeyRound size={10} />
                                 <span className="font-mono">{d.password || 'Sem senha'}</span>
                               </div>
                            </div>
-                           <button 
-                             onClick={() => handleDeleteDriver(d.id)}
-                             className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
-                             title="Remover Motorista"
-                           >
-                              <Trash2 size={16} />
-                           </button>
+                           <div className="flex items-center gap-1">
+                             {d.route_started_at && (
+                               <button
+                                 onClick={() => handleFinishDriverRoute(d)}
+                                 className="text-xs font-semibold text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-1"
+                                 title="Finalizar rota do motorista"
+                               >
+                                 <Flag size={13} /> Finalizar
+                               </button>
+                             )}
+                             <button
+                               onClick={() => handleDeleteDriver(d.id)}
+                               className="text-red-400 hover:text-red-600 p-1 hover:bg-red-50 dark:hover:bg-red-900/30 rounded"
+                               title="Remover Motorista"
+                             >
+                                <Trash2 size={16} />
+                             </button>
+                           </div>
                         </div>
                       ))
                     )}
