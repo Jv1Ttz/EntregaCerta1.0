@@ -3560,7 +3560,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                             <p className="px-3 py-4 text-xs text-slate-400 text-center">Nenhuma nota pendente elegível.</p>
                           ) : elegiveis.map(inv => {
                             const checked = scheduleSelectedIds.includes(inv.id);
-                            const outro = inv.driver_id && inv.driver_id !== scheduleDriverId ? drivers.find(d => d.id === inv.driver_id)?.name : null;
+                            // "de [nome]" só para motorista REAL. A conta "GESTOR" é o
+                            // balcão (nota ainda não distribuída) — não mostra tag.
+                            const outroDrv = inv.driver_id && inv.driver_id !== scheduleDriverId ? drivers.find(d => d.id === inv.driver_id) : null;
+                            const outro = outroDrv && outroDrv.name?.trim().toUpperCase() !== 'GESTOR' ? outroDrv.name : null;
                             return (
                               <label key={inv.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40">
                                 <input type="checkbox" checked={checked} onChange={() => toggle(inv.id)} className="accent-blue-600" />
