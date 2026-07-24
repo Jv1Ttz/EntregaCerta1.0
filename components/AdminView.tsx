@@ -912,6 +912,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
     setUploading(false);
   };
 
+  // Nota atribuída a um motorista que JÁ está em rota: pergunta se entra na rota
+  // atual agora ou fica Faturada para a próxima. Retorna o intent (addToActiveRoute).
+  // Só pergunta quando faz sentido (motorista em rota e a nota ainda não está na rota dele).
+  const askAddToActiveRoute = (targetDriverId: string | null, inv?: Invoice): boolean => {
+    if (!targetDriverId) return false;
+    const drv = drivers.find(d => d.id === targetDriverId);
+    if (!drv?.route_started_at) return false; // não está em rota → faturada normal
+    if (inv && inv.status === DeliveryStatus.IN_PROGRESS && inv.driver_id === targetDriverId) return true; // já está na rota dele
+    return window.confirm(
+      `${drv.name} já está EM ROTA.\n\n` +
+      `OK = adicionar esta nota à rota atual dele agora.\n` +
+      `Cancelar = deixar como Faturada (entra na próxima rota).`
+    );
+  };
+
   const handleLogisticsUpdate = async (invoiceId: string, field: 'driver' | 'vehicle', value: string) => {
     const inv = invoices.find(i => i.id === invoiceId);
     if (!inv) return;
@@ -985,7 +1000,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
     const newDriverId = field === 'driver' ? value : inv.driver_id;
     const newVehicleId = field === 'vehicle' ? value : inv.vehicle_id;
 
-    await db.assignLogistics(invoiceId, newDriverId || null, newVehicleId || null);
+    // Só pergunta ao atribuir MOTORISTA; troca de veículo preserva o estado atual.
+    const addToRoute = field === 'driver' ? askAddToActiveRoute(newDriverId || null, inv) : false;
+    await db.assignLogistics(invoiceId, newDriverId || null, newVehicleId || null, addToRoute);
     refreshData();
   };
 
@@ -1115,13 +1132,26 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
       return;
     }
 
+    // Atribuindo a um motorista já em rota: pergunta UMA vez, aplica a todas.
+    let bulkAddToRoute = false;
+    if (bulkDriver) {
+      const drv = drivers.find(d => d.id === bulkDriver);
+      if (drv?.route_started_at) {
+        bulkAddToRoute = window.confirm(
+          `${drv.name} já está EM ROTA.\n\n` +
+          `OK = adicionar as notas selecionadas à rota atual dele agora.\n` +
+          `Cancelar = deixar como Faturadas (entram na próxima rota).`
+        );
+      }
+    }
+
     const promises: Promise<void>[] = [];
     selectedInvoiceIds.forEach(id => {
       const currentInv = invoices.find(i => i.id === id);
       if (currentInv) {
         const driverToSet = bulkDriver || currentInv.driver_id;
         const vehicleToSet = bulkVehicle || currentInv.vehicle_id;
-        promises.push(db.assignLogistics(id, driverToSet, vehicleToSet));
+        promises.push(db.assignLogistics(id, driverToSet, vehicleToSet, bulkAddToRoute));
       }
     });
 

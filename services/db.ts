@@ -363,41 +363,42 @@ export const db = {
   },
 
 //Trecho que mudei a logica do em rota 👇
-assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: string | null) => {
-    const { data: currentInv } = await supabase.from('invoices').select('driver_id, number').eq('id', invoiceId).single();
-    
-    const updates: any = { 
-        driver_id: driverId, 
-        vehicle_id: vehicleId 
+assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: string | null, addToActiveRoute = false) => {
+    const { data: currentInv } = await supabase.from('invoices').select('driver_id, number, status').eq('id', invoiceId).single();
+
+    const updates: any = {
+        driver_id: driverId,
+        vehicle_id: vehicleId
     };
 //Trecho que mudei a logica do em rota 👆
 
+    const rotaAtivaId = async (dId: string): Promise<string | null> => {
+        const { data } = await supabase
+            .from('routes').select('id')
+            .eq('driver_id', dId).eq('status', 'IN_PROGRESS')
+            .order('started_at', { ascending: false }).limit(1).maybeSingle();
+        return data?.id ?? null;
+    };
+
     if (driverId) {
-        // 👇 NOVO: Verifica se o motorista já iniciou a rota hoje
-        // Procuramos por qualquer nota deste motorista que já esteja 'IN_PROGRESS'
-        const { count } = await supabase
-            .from('invoices')
-            .select('*', { count: 'exact', head: true })
-            .eq('driver_id', driverId)
-            .eq('status', DeliveryStatus.IN_PROGRESS);
+        const driverMudou = currentInv?.driver_id !== driverId;
+        const jaEmRotaMesmoMotorista = currentInv?.status === DeliveryStatus.IN_PROGRESS && !driverMudou;
 
-        // Se ele já tiver notas em rota, a nova nota entra direto como 'IN_PROGRESS'
-        // Caso contrário, entra como 'PENDING' aguardando o "Iniciar Rota"
-        updates.status = (count && count > 0)
-            ? DeliveryStatus.IN_PROGRESS
-            : DeliveryStatus.PENDING;
-
-        // Entrando numa rota já ativa: carimba a rota para entrar na contagem.
-        if (updates.status === DeliveryStatus.IN_PROGRESS) {
-            const { data: rota } = await supabase
-                .from('routes')
-                .select('id')
-                .eq('driver_id', driverId)
-                .eq('status', 'IN_PROGRESS')
-                .order('started_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-            if (rota?.id) updates.route_id = rota.id;
+        if (jaEmRotaMesmoMotorista) {
+            // Já está em rota com este motorista: mantém, só garante o carimbo.
+            updates.status = DeliveryStatus.IN_PROGRESS;
+            const rid = await rotaAtivaId(driverId);
+            if (rid) updates.route_id = rid;
+        } else if (addToActiveRoute) {
+            // Gestor optou por adicionar à rota ativa (motorista já saiu/está na doca).
+            const rid = await rotaAtivaId(driverId);
+            if (rid) { updates.status = DeliveryStatus.IN_PROGRESS; updates.route_id = rid; }
+            else updates.status = DeliveryStatus.PENDING; // sem rota ativa → faturada
+        } else {
+            // Fica faturada, aguardando "Iniciar Rota" (ou a próxima rota).
+            updates.status = DeliveryStatus.PENDING;
+            // Trocou de motorista: sai de qualquer rota/reserva anterior.
+            if (driverMudou) updates.route_id = null;
         }
     }
 
