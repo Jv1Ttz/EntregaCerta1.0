@@ -371,6 +371,40 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
     ? new Date(scheduledRoute.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })
     : '';
 
+  // Com a rota ativa, separa o que está de fato EM ROTA das notas Faturadas
+  // (atribuídas mas fora da rota atual). Sem isso, uma Faturada apareceria como
+  // "Parada #1" misturada nas entregas do dia.
+  const rotaInvoices = routeStarted ? pendingInvoices.filter(i => i.status !== DeliveryStatus.PENDING) : pendingInvoices;
+  const faturadasFora = routeStarted ? pendingInvoices.filter(i => i.status === DeliveryStatus.PENDING) : [];
+
+  const renderStop = (inv: Invoice, index: number, section: 'rota' | 'faturada') => {
+    const isInProgress = inv.status === DeliveryStatus.IN_PROGRESS;
+    return (
+      <div
+        key={inv.id}
+        onClick={() => setSelectedInvoice(inv)}
+        className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border active:scale-95 transition-transform cursor-pointer relative ${isInProgress ? 'border-blue-300 dark:border-blue-700 shadow-blue-100 dark:shadow-none ring-1 ring-blue-100 dark:ring-blue-900' : 'border-gray-200 dark:border-slate-700'}`}
+      >
+        {isInProgress && (
+          <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><Navigation2 size={10} /> EM ROTA</div>
+        )}
+        <div className={`absolute top-4 left-0 w-1 h-8 rounded-r-full ${isInProgress ? 'bg-blue-500' : 'bg-orange-400'}`}></div>
+        <div className="flex justify-between items-start mb-2 pl-2">
+          <span className={`text-xs font-bold px-2 py-1 rounded-md ${isInProgress ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'}`}>
+            {section === 'rota' ? `Parada #${index + 1}` : 'Faturada'}
+          </span>
+          <span className="text-xs text-gray-400 dark:text-slate-500 font-mono">NF {inv.number}</span>
+        </div>
+        <h3 className="font-bold text-gray-900 dark:text-white text-lg leading-tight mb-1 pl-2">{inv.customer_name}</h3>
+        <p className="text-sm text-gray-500 dark:text-slate-400 line-clamp-2 pl-2">{inv.customer_address}</p>
+        <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between text-blue-600 dark:text-blue-400 font-medium text-sm pl-2">
+          <span className="flex items-center gap-1"><MapPin size={16}/> Ver Detalhes</span>
+          <Navigation size={16} />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-slate-900 pb-20 transition-colors duration-300">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
@@ -477,14 +511,14 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           <div className="flex justify-between items-end mb-3 px-1">
              <h2 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
                <Package className="text-orange-500" />
-               Minha Rota ({pendingInvoices.length})
+               Minha Rota ({rotaInvoices.length})
              </h2>
              <div className="flex gap-2">
                 <button onClick={refreshData} className={`p-1.5 rounded-full border border-slate-200 dark:border-slate-600 ${refreshing ? 'bg-slate-100 dark:bg-slate-700 animate-spin' : 'bg-white dark:bg-slate-800'}`}>
                     <RefreshCw size={16} className="text-slate-600 dark:text-slate-300"/>
                 </button>
-                {pendingInvoices.length > 0 && routeStarted && (
-                <button onClick={() => handleFullRouteNavigation(pendingInvoices)} className="flex items-center gap-1 text-blue-600 dark:text-blue-400 text-sm font-bold bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800 active:scale-95 transition-transform">
+                {rotaInvoices.length > 0 && routeStarted && (
+                <button onClick={() => handleFullRouteNavigation(rotaInvoices)} className="flex items-center gap-1 text-blue-600 dark:text-blue-400 text-sm font-bold bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-full border border-blue-100 dark:border-blue-800 active:scale-95 transition-transform">
                     <Compass size={16} /> Mapa Completo
                 </button>
                 )}
@@ -492,37 +526,32 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
           </div>
 
           <div className="space-y-3">
-            {pendingInvoices.length === 0 ? (
-              <div className="text-center py-10 text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">Sem entregas pendentes.</div>
+            {rotaInvoices.length === 0 ? (
+              <div className="text-center py-10 text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-800 rounded-xl border border-dashed border-gray-300 dark:border-slate-600">
+                {routeStarted ? 'Nenhuma entrega em rota.' : 'Sem entregas pendentes.'}
+              </div>
             ) : (
-              pendingInvoices.map((inv, index) => {
-                const isInProgress = inv.status === DeliveryStatus.IN_PROGRESS;
-                return (
-                  <div 
-                    key={inv.id}
-                    onClick={() => setSelectedInvoice(inv)}
-                    className={`bg-white dark:bg-slate-800 p-5 rounded-xl shadow-sm border active:scale-95 transition-transform cursor-pointer relative ${isInProgress ? 'border-blue-300 dark:border-blue-700 shadow-blue-100 dark:shadow-none ring-1 ring-blue-100 dark:ring-blue-900' : 'border-gray-200 dark:border-slate-700'}`}
-                  >
-                    {isInProgress && (
-                       <div className="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm flex items-center gap-1"><Navigation2 size={10} /> EM ROTA</div>
-                    )}
-                    <div className={`absolute top-4 left-0 w-1 h-8 rounded-r-full ${isInProgress ? 'bg-blue-500' : 'bg-orange-400'}`}></div>
-                    <div className="flex justify-between items-start mb-2 pl-2">
-                      <span className={`text-xs font-bold px-2 py-1 rounded-md ${isInProgress ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'}`}>Parada #{index + 1}</span>
-                      <span className="text-xs text-gray-400 dark:text-slate-500 font-mono">NF {inv.number}</span>
-                    </div>
-                    <h3 className="font-bold text-gray-900 dark:text-white text-lg leading-tight mb-1 pl-2">{inv.customer_name}</h3>
-                    <p className="text-sm text-gray-500 dark:text-slate-400 line-clamp-2 pl-2">{inv.customer_address}</p>
-                    <div className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700 flex items-center justify-between text-blue-600 dark:text-blue-400 font-medium text-sm pl-2">
-                       <span className="flex items-center gap-1"><MapPin size={16}/> Ver Detalhes</span>
-                       <Navigation size={16} />
-                    </div>
-                  </div>
-                );
-              })
+              rotaInvoices.map((inv, index) => renderStop(inv, index, 'rota'))
             )}
           </div>
         </div>
+
+        {/* Faturadas: atribuídas ao motorista, mas FORA da rota atual */}
+        {faturadasFora.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h2 className="text-lg font-bold text-gray-800 dark:text-white flex items-center gap-2">
+                <FileText className="text-orange-500" size={20} /> Faturadas ({faturadasFora.length})
+              </h2>
+            </div>
+            <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800/50 rounded-lg p-3 text-xs text-orange-700 dark:text-orange-300 mb-3">
+              Atribuídas a você, mas <b>fora da rota atual</b>. Entram numa próxima rota (ou quando o gestor liberar).
+            </div>
+            <div className="space-y-3">
+              {faturadasFora.map((inv, index) => renderStop(inv, index, 'faturada'))}
+            </div>
+          </div>
+        )}
 
         {/* SEÇÃO DE HISTÓRICO ATUALIZADA */}
         {historyInvoices.length > 0 && (
