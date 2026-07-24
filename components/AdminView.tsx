@@ -122,6 +122,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [newVehicleMaxWeight, setNewVehicleMaxWeight] = useState<string>('');
   const [showFleetMonitor, setShowFleetMonitor] = useState(false);
   const [showControladoria, setShowControladoria] = useState(false);
+  const [showAgendamento, setShowAgendamento] = useState(false);
   const [controlTab, setControlTab] = useState<'notas' | 'rotas'>('notas');
   const [routesData, setRoutesData] = useState<RouteEntity[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
@@ -1940,6 +1941,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               <LayoutDashboard className="h-4 w-4" /> <span className="font-medium text-sm">Controladoria</span>
             </button>
 
+            <button onClick={() => { setShowAgendamento(true); loadScheduledRoutes(); }} className="flex items-center justify-center gap-2 px-3 py-2 bg-sky-50 dark:bg-sky-900/30 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-sky-700 dark:text-sky-400 border border-sky-200 dark:border-sky-800 rounded-md transition-colors shadow-sm">
+              <CalendarClock className="h-4 w-4" /> <span className="font-medium text-sm">Agendamento</span>
+            </button>
+
             <button onClick={() => onNavigate?.('ADMIN_ROUTING')} className="flex items-center justify-center gap-2 px-3 py-2 bg-violet-50 dark:bg-violet-900/30 hover:bg-violet-100 dark:hover:bg-violet-900/50 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 rounded-md transition-colors shadow-sm">
               <Route className="h-4 w-4" /> <span className="font-medium text-sm">Roteirização</span>
             </button>
@@ -3242,7 +3247,6 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       if (t.id === 'rotas') {
                         setRoutesLoading(true);
                         db.getRoutes().then(rs => { setRoutesData(rs); setRoutesLoading(false); });
-                        loadScheduledRoutes();
                       }
                     }}
                     className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg -mb-px border-b-2 transition-colors ${
@@ -3342,106 +3346,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </>)}
 
               {controlTab === 'rotas' && (
-                <div className="flex-1 overflow-y-auto p-5 space-y-5">
-                  {/* Agendamento */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                        <CalendarClock size={16} className="text-blue-500" /> Rotas agendadas
-                      </h3>
-                      <button
-                        onClick={() => {
-                          setShowScheduleForm(v => !v);
-                          const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-                          setScheduleDate(prev => prev || amanha);
-                        }}
-                        className="text-xs font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-1"
-                      >
-                        <Plus size={14} /> Agendar rota
-                      </button>
-                    </div>
-
-                    {showScheduleForm && (
-                      <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex flex-col sm:flex-row sm:items-end gap-3">
-                        <div className="flex-1">
-                          <label className="block text-xs text-slate-500 mb-1">Motorista</label>
-                          <select
-                            value={scheduleDriverId}
-                            onChange={e => setScheduleDriverId(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">Selecione…</option>
-                            {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                          </select>
-                          {scheduleDriverId && (() => {
-                            const drv = drivers.find(d => d.id === scheduleDriverId);
-                            const ativo = !!drv?.route_started_at;
-                            const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
-                            const agLabel = ag?.scheduled_for ? new Date(ag.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR') : null;
-                            return (
-                              <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-400">
-                                {ativo ? '🟢 Em rota agora' : '⚪ Livre'}
-                                {agLabel && ` · 📅 já agendado para ${agLabel} (será reagendado)`}
-                              </p>
-                            );
-                          })()}
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">Data</label>
-                          <input
-                            type="date"
-                            value={scheduleDate}
-                            min={new Date().toISOString().split('T')[0]}
-                            onChange={e => setScheduleDate(e.target.value)}
-                            className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <button
-                          onClick={handleScheduleRoute}
-                          disabled={!scheduleDriverId || !scheduleDate}
-                          className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          Agendar
-                        </button>
-                      </div>
-                    )}
-
-                    {scheduledRoutes.length === 0 ? (
-                      <p className="text-xs text-slate-400 dark:text-slate-500">Nenhuma rota agendada.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {scheduledRoutes.map(r => {
-                          const d = r.scheduled_for ? new Date(r.scheduled_for + 'T12:00:00') : null;
-                          const label = d ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
-                          const notasPend = invoices.filter(i => i.driver_id === r.driver_id && i.status === 'PENDING').length;
-                          return (
-                            <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <CalendarClock size={16} className="text-blue-500 shrink-0" />
-                                <div className="min-w-0">
-                                  <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
-                                  <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
-                                  <p className="text-[11px] text-slate-400 dark:text-slate-500">{notasPend} nota(s) pendente(s) atribuída(s) hoje</p>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleCancelSchedule(r)}
-                                className="text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
-                              >
-                                Cancelar
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Histórico */}
-                  <div className="space-y-3">
-                  <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                    <Flag size={16} className="text-slate-500" /> Histórico de rotas
-                  </h3>
+                <div className="flex-1 overflow-y-auto p-5 space-y-3">
                   {routesLoading ? (
                     <div className="py-16 text-center text-sm text-slate-500">Carregando rotas…</div>
                   ) : routesData.length === 0 ? (
@@ -3532,13 +3437,132 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       );
                     })
                   )}
-                  </div>
                 </div>
               )}
             </div>
           </div>
         );
       })()}
+
+      {/* Agendamento de Rotas */}
+      {showAgendamento && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700">
+              <div className="flex items-center gap-3">
+                <CalendarClock size={22} className="text-blue-500" />
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800 dark:text-white">Agendamento de Rotas</h2>
+                  <p className="text-xs text-slate-500">Programe a próxima rota de cada motorista.</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowAgendamento(false); setShowScheduleForm(false); }} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+                  <CalendarClock size={16} className="text-blue-500" /> Rotas agendadas
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowScheduleForm(v => !v);
+                    const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+                    setScheduleDate(prev => prev || amanha);
+                  }}
+                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-3 py-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-1"
+                >
+                  <Plus size={14} /> Agendar rota
+                </button>
+              </div>
+
+              {showScheduleForm && (
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex flex-col sm:flex-row sm:items-end gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs text-slate-500 mb-1">Motorista</label>
+                    <select
+                      value={scheduleDriverId}
+                      onChange={e => setScheduleDriverId(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Selecione…</option>
+                      {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                    {scheduleDriverId && (() => {
+                      const drv = drivers.find(d => d.id === scheduleDriverId);
+                      const ativo = !!drv?.route_started_at;
+                      const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
+                      const agLabel = ag?.scheduled_for ? new Date(ag.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR') : null;
+                      return (
+                        <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-400">
+                          {ativo ? '🟢 Em rota agora' : '⚪ Livre'}
+                          {agLabel && ` · 📅 já agendado para ${agLabel} (será reagendado)`}
+                        </p>
+                      );
+                    })()}
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">Data</label>
+                    <input
+                      type="date"
+                      value={scheduleDate}
+                      min={new Date().toISOString().split('T')[0]}
+                      onChange={e => setScheduleDate(e.target.value)}
+                      className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <button
+                    onClick={handleScheduleRoute}
+                    disabled={!scheduleDriverId || !scheduleDate}
+                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Agendar
+                  </button>
+                </div>
+              )}
+
+              {scheduledRoutes.length === 0 ? (
+                <div className="py-12 text-center">
+                  <CalendarClock size={32} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                  <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma rota agendada.</p>
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">Use "Agendar rota" para programar a saída de um motorista.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {scheduledRoutes.map(r => {
+                    const d = r.scheduled_for ? new Date(r.scheduled_for + 'T12:00:00') : null;
+                    const label = d ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
+                    const hojeStr = new Date().toISOString().split('T')[0];
+                    const atrasada = !!r.scheduled_for && r.scheduled_for < hojeStr;
+                    const notasPend = invoices.filter(i => i.driver_id === r.driver_id && i.status === 'PENDING').length;
+                    return (
+                      <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <CalendarClock size={16} className="text-blue-500 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
+                            <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
+                            {atrasada && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium ml-2">atrasada</span>}
+                            <p className="text-[11px] text-slate-400 dark:text-slate-500">{notasPend} nota(s) pendente(s) atribuída(s) hoje</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleCancelSchedule(r)}
+                          className="text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
      {/* Fleet Monitor Modal (VERSÃO FINAL 2.0: COM ROTAS VISUAIS) */}
       {showFleetMonitor && (
