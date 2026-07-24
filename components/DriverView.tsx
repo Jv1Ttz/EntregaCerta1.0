@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
-import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification } from '../types';
-import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon, Flag, Clock } from 'lucide-react';
+import { Driver, Invoice, DeliveryStatus, DeliveryProof, Vehicle, AppNotification, Route as RouteEntity } from '../types';
+import { Truck, MapPin, Navigation, Camera, AlertOctagon, CheckCircle, XCircle, ChevronLeft, Search, Package, User, FileText, Map, DollarSign, Compass, Satellite, Navigation2, RefreshCw, Sun, Moon, Lock, AlertTriangle, LogOut, Info, Loader2, ChevronDown, ChevronUp, MapIcon, Flag, Clock, CalendarClock } from 'lucide-react';
 import SignatureCanvas from './ui/SignatureCanvas';
 import { ToastContainer } from './ui/Toast';
 import { getReasonsFor, REASON_REQUIRES_DETAIL, NAO_ENTREGUE_REASONS } from '../constants/returnReasons';
@@ -94,6 +94,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [driver, setDriver] = useState<Driver | undefined>(undefined);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [scheduledRoute, setScheduledRoute] = useState<RouteEntity | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showHistory, setShowHistory] = useState(false); // Começa fechado
@@ -275,14 +276,16 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const refreshData = async () => {
     setRefreshing(true);
     try {
-        const [allDrivers, driverInvoices, allVehicles] = await Promise.all([
+        const [allDrivers, driverInvoices, allVehicles, agendada] = await Promise.all([
             db.getDrivers(),
             db.getInvoicesByDriver(driverId),
-            db.getVehicles()
+            db.getVehicles(),
+            db.getScheduledRouteForDriver(driverId)
         ]);
         setDriver(allDrivers.find(d => d.id === driverId));
         setInvoices(driverInvoices);
         setVehicles(allVehicles);
+        setScheduledRoute(agendada);
     } catch(e) {
         console.error(e);
     } finally {
@@ -359,6 +362,14 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const currentVehicleId = pendingInvoices[0]?.vehicle_id;
   const currentVehicle = vehicles.find(v => v.id === currentVehicleId);
 
+  // Agendamento: rota marcada para uma data futura trava o INICIAR até o dia.
+  const hojeLocal = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
+  const scheduledFuture = !!scheduledRoute?.scheduled_for && scheduledRoute.scheduled_for > hojeLocal;
+  const scheduledDue = !!scheduledRoute && !scheduledFuture; // agendada para hoje ou vencida
+  const scheduledDateLabel = scheduledRoute?.scheduled_for
+    ? new Date(scheduledRoute.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })
+    : '';
+
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-slate-900 pb-20 transition-colors duration-300">
       <ToastContainer notifications={notifications} onRemove={removeNotification} />
@@ -398,12 +409,35 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
       </div>
 
       <div className="p-4 space-y-6">
-        {pendingInvoices.length > 0 && !routeStarted && (
+        {/* Rota agendada para o futuro: início travado até o dia. */}
+        {!routeStarted && scheduledFuture && (
         <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
-                🔒 Inicie a rota para liberar a baixa das entregas.
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-200 text-center flex items-center justify-center gap-2">
+                <CalendarClock size={16} /> Rota agendada para <b className="capitalize">{scheduledDateLabel}</b>. O início libera no dia.
             </div>
-            <button 
+            <button
+              disabled
+              className="bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 p-4 rounded-xl flex items-center justify-center gap-2 cursor-not-allowed"
+            >
+              <Lock size={22} />
+              <span className="font-bold text-lg">INICIAR ROTA</span>
+            </button>
+        </div>
+        )}
+
+        {/* Sem agendamento futuro: início liberado (agendada de hoje é adotada). */}
+        {!routeStarted && !scheduledFuture && pendingInvoices.length > 0 && (
+        <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
+            {scheduledDue ? (
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-200 text-center flex items-center justify-center gap-2">
+                  <CalendarClock size={16} /> Rota agendada para hoje. Toque para iniciar.
+              </div>
+            ) : (
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
+                  🔒 Inicie a rota para liberar a baixa das entregas.
+              </div>
+            )}
+            <button
               onClick={handleStartRoute}
               className="bg-green-600 dark:bg-green-700 text-white p-4 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform animate-pulse"
             >

@@ -433,13 +433,32 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       .limit(1);
     const vehicleId = pend?.[0]?.vehicle_id ?? null;
 
-    // 1. Abre a linha da rota (histórico + base do agendamento futuro)
-    const { data: rota } = await supabase
+    // 1. Rota agendada "vencida" (data <= hoje) é ADOTADA; senão abre uma ad-hoc.
+    const hoje = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
+    const { data: agendada } = await supabase
       .from('routes')
-      .insert({ driver_id: driverId, vehicle_id: vehicleId, status: 'IN_PROGRESS', started_at: agora })
-      .select('id')
-      .single();
-    const routeId = rota?.id ?? null;
+      .select('id, scheduled_for')
+      .eq('driver_id', driverId)
+      .eq('status', 'SCHEDULED')
+      .order('scheduled_for', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    let routeId: string | null;
+    if (agendada && (!agendada.scheduled_for || agendada.scheduled_for <= hoje)) {
+      await supabase
+        .from('routes')
+        .update({ status: 'IN_PROGRESS', started_at: agora, vehicle_id: vehicleId })
+        .eq('id', agendada.id);
+      routeId = agendada.id;
+    } else {
+      const { data: rota } = await supabase
+        .from('routes')
+        .insert({ driver_id: driverId, vehicle_id: vehicleId, status: 'IN_PROGRESS', started_at: agora })
+        .select('id')
+        .single();
+      routeId = rota?.id ?? null;
+    }
 
     // 2. Coloca em rota tudo que estava PENDENTE, carimbando a rota
     await supabase
@@ -619,6 +638,77 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       .order('number');
     if (error) { console.error('Erro ao buscar notas da rota:', error); return []; }
     return (data || []) as Invoice[];
+  },
+
+  /**
+   * Agenda (ou reagenda) a rota de um motorista para uma data. Não reserva notas:
+   * a rota agendada só define motorista + dia; as pendentes do motorista entram
+   * quando ele inicia (startRoute adota a agendada vencida). Um motorista tem no
+   * máximo uma rota agendada por vez — chamar de novo reagenda a data.
+   */
+  scheduleRoute: async (driverId: string, scheduledFor: string) => {
+    const { data: existente } = await supabase
+      .from('routes')
+      .select('id')
+      .eq('driver_id', driverId)
+      .eq('status', 'SCHEDULED')
+      .limit(1)
+      .maybeSingle();
+
+    if (existente) {
+      await supabase.from('routes').update({ scheduled_for: scheduledFor }).eq('id', existente.id);
+    } else {
+      await supabase.from('routes').insert({ driver_id: driverId, status: 'SCHEDULED', scheduled_for: scheduledFor });
+    }
+
+    const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
+    const dataFmt = new Date(scheduledFor + 'T12:00:00').toLocaleDateString('pt-BR');
+    await db.addNotification(driverId, 'Rota Agendada', `Sua próxima rota foi agendada para ${dataFmt}.`, 'INFO');
+    await db.addLog('ASSIGNMENT', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}`);
+  },
+
+  /** Cancela uma rota agendada (não afeta notas, pois não há reserva). */
+  cancelScheduledRoute: async (routeId: string) => {
+    const { data: rota } = await supabase
+      .from('routes')
+      .select('driver_id, scheduled_for')
+      .eq('id', routeId)
+      .single();
+
+    await supabase.from('routes').update({ status: 'CANCELLED' }).eq('id', routeId);
+
+    if (rota?.driver_id) {
+      await db.addNotification(rota.driver_id, 'Agendamento Cancelado', 'O agendamento da sua próxima rota foi cancelado.', 'INFO');
+    }
+    await db.addLog('ASSIGNMENT', `Agendamento de rota cancelado`);
+  },
+
+  /** Rotas agendadas (lista do gestor), com nome do motorista e placa. */
+  getScheduledRoutes: async (): Promise<Route[]> => {
+    const { data, error } = await supabase
+      .from('routes')
+      .select('*, drivers(name), vehicles(plate)')
+      .eq('status', 'SCHEDULED')
+      .order('scheduled_for', { ascending: true });
+    if (error) { console.error('Erro ao buscar rotas agendadas:', error); return []; }
+    return (data || []).map((r: any) => ({
+      ...r,
+      driver_name: r.drivers?.name ?? r.driver_id,
+      vehicle_plate: r.vehicles?.plate ?? null,
+    }));
+  },
+
+  /** A rota agendada mais próxima de um motorista (para a trava no app dele). */
+  getScheduledRouteForDriver: async (driverId: string): Promise<Route | null> => {
+    const { data } = await supabase
+      .from('routes')
+      .select('*')
+      .eq('driver_id', driverId)
+      .eq('status', 'SCHEDULED')
+      .order('scheduled_for', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    return (data as Route) ?? null;
   },
 
   // ATUALIZADA: Agora aceita o segundo argumento 'invoiceValueLoss'
