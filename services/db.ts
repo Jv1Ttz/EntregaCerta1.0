@@ -453,12 +453,22 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       .maybeSingle();
 
     let routeId: string | null;
+    let usarReservadas = false;
     if (agendada && (!agendada.scheduled_for || agendada.scheduled_for <= hoje)) {
       await supabase
         .from('routes')
         .update({ status: 'IN_PROGRESS', started_at: agora, vehicle_id: vehicleId })
         .eq('id', agendada.id);
       routeId = agendada.id;
+      // Se a rota agendada tem notas reservadas, leva SÓ elas (conjunto fechado).
+      // Sem reservas, cai no comportamento aberto (todas as pendentes do dia).
+      const { count: reservadas } = await supabase
+        .from('invoices')
+        .select('*', { count: 'exact', head: true })
+        .eq('route_id', routeId)
+        .eq('driver_id', driverId)
+        .eq('status', 'PENDING');
+      usarReservadas = (reservadas || 0) > 0;
     } else {
       const { data: rota } = await supabase
         .from('routes')
@@ -468,12 +478,23 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       routeId = rota?.id ?? null;
     }
 
-    // 2. Coloca em rota tudo que estava PENDENTE, carimbando a rota
-    await supabase
-      .from('invoices')
-      .update({ status: 'IN_PROGRESS', route_id: routeId })
-      .eq('driver_id', driverId)
-      .eq('status', 'PENDING');
+    // 2. Embarca as notas na rota.
+    if (usarReservadas) {
+      // Conjunto fechado: só as reservadas (já têm route_id) viram IN_PROGRESS.
+      await supabase
+        .from('invoices')
+        .update({ status: 'IN_PROGRESS' })
+        .eq('route_id', routeId)
+        .eq('driver_id', driverId)
+        .eq('status', 'PENDING');
+    } else {
+      // Aberto: todas as pendentes do motorista, carimbando a rota.
+      await supabase
+        .from('invoices')
+        .update({ status: 'IN_PROGRESS', route_id: routeId })
+        .eq('driver_id', driverId)
+        .eq('status', 'PENDING');
+    }
 
     // 3. Marca a rota como ATIVA (fonte de verdade, não mais o localStorage)
     await supabase
@@ -654,7 +675,7 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
    * quando ele inicia (startRoute adota a agendada vencida). Um motorista tem no
    * máximo uma rota agendada por vez — chamar de novo reagenda a data.
    */
-  scheduleRoute: async (driverId: string, scheduledFor: string) => {
+  scheduleRoute: async (driverId: string, scheduledFor: string, invoiceIds: string[] = []) => {
     const { data: existente } = await supabase
       .from('routes')
       .select('id')
@@ -663,16 +684,41 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       .limit(1)
       .maybeSingle();
 
+    let routeId: string | null;
     if (existente) {
-      await supabase.from('routes').update({ scheduled_for: scheduledFor }).eq('id', existente.id);
+      routeId = existente.id;
+      await supabase.from('routes').update({ scheduled_for: scheduledFor }).eq('id', routeId);
     } else {
-      await supabase.from('routes').insert({ driver_id: driverId, status: 'SCHEDULED', scheduled_for: scheduledFor });
+      const { data: nova } = await supabase
+        .from('routes')
+        .insert({ driver_id: driverId, status: 'SCHEDULED', scheduled_for: scheduledFor })
+        .select('id')
+        .single();
+      routeId = nova?.id ?? null;
+    }
+
+    // Reserva de notas (conjunto fechado). Reconcilia: solta as que estavam
+    // reservadas nesta rota e foram desmarcadas; reserva as marcadas (assina ao
+    // motorista, mantém PENDING até ele iniciar).
+    if (routeId) {
+      const { data: reservadasAtuais } = await supabase.from('invoices').select('id').eq('route_id', routeId);
+      const selecionadas = new Set(invoiceIds);
+      const soltar = (reservadasAtuais || []).map(r => r.id).filter(id => !selecionadas.has(id));
+      if (soltar.length) await supabase.from('invoices').update({ route_id: null }).in('id', soltar);
+      if (invoiceIds.length) {
+        await supabase.from('invoices')
+          .update({ route_id: routeId, driver_id: driverId })
+          .in('id', invoiceIds)
+          .eq('status', 'PENDING');
+      }
     }
 
     const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
     const dataFmt = new Date(scheduledFor + 'T12:00:00').toLocaleDateString('pt-BR');
-    await db.addNotification(driverId, 'Rota Agendada', `Sua próxima rota foi agendada para ${dataFmt}.`, 'INFO');
-    await db.addLog('ASSIGNMENT', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}`);
+    const qtd = invoiceIds.length;
+    const detalhe = qtd > 0 ? ` com ${qtd} nota(s)` : '';
+    await db.addNotification(driverId, 'Rota Agendada', `Sua próxima rota foi agendada para ${dataFmt}${detalhe}.`, 'INFO');
+    await db.addLog('ASSIGNMENT', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}${detalhe}`);
   },
 
   /** Cancela uma rota agendada (não afeta notas, pois não há reserva). */
@@ -683,6 +729,8 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       .eq('id', routeId)
       .single();
 
+    // Solta as notas reservadas (voltam ao pool livre, seguem PENDING/atribuídas).
+    await supabase.from('invoices').update({ route_id: null }).eq('route_id', routeId);
     await supabase.from('routes').update({ status: 'CANCELLED' }).eq('id', routeId);
 
     if (rota?.driver_id) {

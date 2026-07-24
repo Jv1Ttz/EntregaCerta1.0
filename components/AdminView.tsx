@@ -132,6 +132,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [showScheduleForm, setShowScheduleForm] = useState(false);
   const [scheduleDriverId, setScheduleDriverId] = useState('');
   const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleSelectedIds, setScheduleSelectedIds] = useState<string[]>([]);
+  const [scheduleNoteSearch, setScheduleNoteSearch] = useState('');
   const [controlDate, setControlDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -1339,17 +1341,32 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     const hojeStr = new Date().toISOString().split('T')[0];
     if (drv?.route_started_at && scheduleDate === hojeStr &&
         !window.confirm(`${nome} já está em rota agora. Agendar para hoje cria uma 2ª rota quando ele finalizar a atual. Continuar?`)) return;
-    await db.scheduleRoute(scheduleDriverId, scheduleDate);
+    await db.scheduleRoute(scheduleDriverId, scheduleDate, scheduleSelectedIds);
     setShowScheduleForm(false);
     setScheduleDriverId('');
     setScheduleDate('');
-    await loadScheduledRoutes();
+    setScheduleSelectedIds([]);
+    setScheduleNoteSearch('');
+    await Promise.all([loadScheduledRoutes(), refreshData()]);
+  };
+
+  // Ao escolher o motorista no agendar: pré-carrega a data e as notas já
+  // reservadas do agendamento existente dele (para editar sem perder o set).
+  const onPickScheduleDriver = (driverId: string) => {
+    setScheduleDriverId(driverId);
+    const ag = scheduledRoutes.find(r => r.driver_id === driverId);
+    if (ag) {
+      if (ag.scheduled_for) setScheduleDate(ag.scheduled_for);
+      setScheduleSelectedIds(invoices.filter(i => i.route_id === ag.id).map(i => i.id));
+    } else {
+      setScheduleSelectedIds([]);
+    }
   };
 
   const handleCancelSchedule = async (r: RouteEntity) => {
-    if (!window.confirm(`Cancelar o agendamento de ${r.driver_name}?`)) return;
+    if (!window.confirm(`Cancelar o agendamento de ${r.driver_name}? As notas reservadas voltam ao pool.`)) return;
     await db.cancelScheduledRoute(r.id);
-    await loadScheduledRoutes();
+    await Promise.all([loadScheduledRoutes(), refreshData()]);
   };
 
   const handleCreateVehicle = async (e: React.FormEvent) => {
@@ -3479,47 +3496,97 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </div>
 
               {showScheduleForm && (
-                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex flex-col sm:flex-row sm:items-end gap-3">
-                  <div className="flex-1">
-                    <label className="block text-xs text-slate-500 mb-1">Motorista</label>
-                    <select
-                      value={scheduleDriverId}
-                      onChange={e => setScheduleDriverId(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Selecione…</option>
-                      {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    </select>
-                    {scheduleDriverId && (() => {
-                      const drv = drivers.find(d => d.id === scheduleDriverId);
-                      const ativo = !!drv?.route_started_at;
-                      const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
-                      const agLabel = ag?.scheduled_for ? new Date(ag.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR') : null;
-                      return (
-                        <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-400">
-                          {ativo ? '🟢 Em rota agora' : '⚪ Livre'}
-                          {agLabel && ` · 📅 já agendado para ${agLabel} (será reagendado)`}
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                    <div className="flex-1">
+                      <label className="block text-xs text-slate-500 mb-1">Motorista</label>
+                      <select
+                        value={scheduleDriverId}
+                        onChange={e => onPickScheduleDriver(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Selecione…</option>
+                        {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                      {scheduleDriverId && (() => {
+                        const drv = drivers.find(d => d.id === scheduleDriverId);
+                        const ativo = !!drv?.route_started_at;
+                        const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
+                        const agLabel = ag?.scheduled_for ? new Date(ag.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR') : null;
+                        return (
+                          <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-400">
+                            {ativo ? '🟢 Em rota agora' : '⚪ Livre'}
+                            {agLabel && ` · 📅 já agendado para ${agLabel} (será reagendado)`}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">Data</label>
+                      <input
+                        type="date"
+                        value={scheduleDate}
+                        min={new Date().toISOString().split('T')[0]}
+                        onChange={e => setScheduleDate(e.target.value)}
+                        className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Seleção de notas (conjunto fechado) */}
+                  {scheduleDriverId && (() => {
+                    const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
+                    const editingRouteId = ag?.id ?? null;
+                    const termo = scheduleNoteSearch.trim().toLowerCase();
+                    const reservadaEmOutra = (i: Invoice) => !!i.route_id && i.route_id !== editingRouteId && scheduledRoutes.some(sr => sr.id === i.route_id);
+                    const elegiveis = invoices.filter(i =>
+                      i.status === 'PENDING' && !i.deleted_at && !reservadaEmOutra(i) &&
+                      (!termo || i.number.toLowerCase().includes(termo) || (i.customer_name || '').toLowerCase().includes(termo))
+                    );
+                    const toggle = (id: string) => setScheduleSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-1 gap-2">
+                          <label className="text-xs text-slate-500">Notas da rota — {scheduleSelectedIds.length} selecionada(s)</label>
+                          <input
+                            value={scheduleNoteSearch}
+                            onChange={e => setScheduleNoteSearch(e.target.value)}
+                            placeholder="Buscar NF / cliente…"
+                            className="text-xs px-2 py-1 border border-slate-200 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500 w-44"
+                          />
+                        </div>
+                        <div className="max-h-52 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700 bg-white dark:bg-slate-800">
+                          {elegiveis.length === 0 ? (
+                            <p className="px-3 py-4 text-xs text-slate-400 text-center">Nenhuma nota pendente elegível.</p>
+                          ) : elegiveis.map(inv => {
+                            const checked = scheduleSelectedIds.includes(inv.id);
+                            const outro = inv.driver_id && inv.driver_id !== scheduleDriverId ? drivers.find(d => d.id === inv.driver_id)?.name : null;
+                            return (
+                              <label key={inv.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                                <input type="checkbox" checked={checked} onChange={() => toggle(inv.id)} className="accent-blue-600" />
+                                <span className="font-mono text-xs text-slate-500 shrink-0">NF {inv.number}</span>
+                                <span className="text-slate-700 dark:text-slate-200 truncate flex-1">{inv.customer_name}</span>
+                                {outro && <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0">de {outro}</span>}
+                              </label>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+                          Nenhuma marcada = leva todas as pendentes do motorista no dia. Marcadas = leva só essas.
                         </p>
-                      );
-                    })()}
+                      </div>
+                    );
+                  })()}
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleScheduleRoute}
+                      disabled={!scheduleDriverId || !scheduleDate}
+                      className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Agendar
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 mb-1">Data</label>
-                    <input
-                      type="date"
-                      value={scheduleDate}
-                      min={new Date().toISOString().split('T')[0]}
-                      onChange={e => setScheduleDate(e.target.value)}
-                      className="px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-700 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <button
-                    onClick={handleScheduleRoute}
-                    disabled={!scheduleDriverId || !scheduleDate}
-                    className="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Agendar
-                  </button>
                 </div>
               )}
 
@@ -3536,7 +3603,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     const label = d ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
                     const hojeStr = new Date().toISOString().split('T')[0];
                     const atrasada = !!r.scheduled_for && r.scheduled_for < hojeStr;
-                    const notasPend = invoices.filter(i => i.driver_id === r.driver_id && i.status === 'PENDING').length;
+                    const reservadas = invoices.filter(i => i.route_id === r.id).length;
                     return (
                       <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg">
                         <div className="flex items-center gap-3 min-w-0">
@@ -3545,7 +3612,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                             <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
                             <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
                             {atrasada && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium ml-2">atrasada</span>}
-                            <p className="text-[11px] text-slate-400 dark:text-slate-500">{notasPend} nota(s) pendente(s) atribuída(s) hoje</p>
+                            <p className="text-[11px] text-slate-400 dark:text-slate-500">{reservadas > 0 ? `${reservadas} nota(s) reservada(s)` : 'todas as pendentes do dia'}</p>
                           </div>
                         </div>
                         <button
