@@ -1330,9 +1330,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
   const handleScheduleRoute = async () => {
     if (!scheduleDriverId || !scheduleDate) return;
+    const drv = drivers.find(d => d.id === scheduleDriverId);
+    const nome = drv?.name || 'motorista';
     const jaAgendado = scheduledRoutes.some(r => r.driver_id === scheduleDriverId);
-    const nome = drivers.find(d => d.id === scheduleDriverId)?.name || 'motorista';
     if (jaAgendado && !window.confirm(`${nome} já tem uma rota agendada. Reagendar para a nova data?`)) return;
+    // Motorista já em rota + agendar para hoje = 2ª rota no mesmo dia. Avisa.
+    const hojeStr = new Date().toISOString().split('T')[0];
+    if (drv?.route_started_at && scheduleDate === hojeStr &&
+        !window.confirm(`${nome} já está em rota agora. Agendar para hoje cria uma 2ª rota quando ele finalizar a atual. Continuar?`)) return;
     await db.scheduleRoute(scheduleDriverId, scheduleDate);
     setShowScheduleForm(false);
     setScheduleDriverId('');
@@ -3368,6 +3373,18 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                             <option value="">Selecione…</option>
                             {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                           </select>
+                          {scheduleDriverId && (() => {
+                            const drv = drivers.find(d => d.id === scheduleDriverId);
+                            const ativo = !!drv?.route_started_at;
+                            const ag = scheduledRoutes.find(r => r.driver_id === scheduleDriverId);
+                            const agLabel = ag?.scheduled_for ? new Date(ag.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR') : null;
+                            return (
+                              <p className="text-[11px] mt-1 text-slate-500 dark:text-slate-400">
+                                {ativo ? '🟢 Em rota agora' : '⚪ Livre'}
+                                {agLabel && ` · 📅 já agendado para ${agLabel} (será reagendado)`}
+                              </p>
+                            );
+                          })()}
                         </div>
                         <div>
                           <label className="block text-xs text-slate-500 mb-1">Data</label>

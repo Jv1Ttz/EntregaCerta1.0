@@ -423,6 +423,14 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   startRoute: async (driverId: string) => {
     const agora = new Date().toISOString();
 
+    // Guard: se o motorista já está EM ROTA, não inicia de novo. Sem isto, um
+    // duplo-toque (ou o gestor forçando) criaria uma 2ª rota IN_PROGRESS e as
+    // duas ficariam disputando as mesmas notas. A UI já esconde o botão quando
+    // ativo — este é o cinto de segurança do lado do banco.
+    const { data: drvAtual } = await supabase
+      .from('drivers').select('route_started_at').eq('id', driverId).single();
+    if (drvAtual?.route_started_at) return;
+
     // Veículo da jornada: pega o das notas pendentes (melhor esforço, pode ser null)
     const { data: pend } = await supabase
       .from('invoices')

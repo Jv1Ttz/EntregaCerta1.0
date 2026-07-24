@@ -366,6 +366,7 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
   const hojeLocal = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
   const scheduledFuture = !!scheduledRoute?.scheduled_for && scheduledRoute.scheduled_for > hojeLocal;
   const scheduledDue = !!scheduledRoute && !scheduledFuture; // agendada para hoje ou vencida
+  const scheduledOverdue = !!scheduledRoute?.scheduled_for && scheduledRoute.scheduled_for < hojeLocal;
   const scheduledDateLabel = scheduledRoute?.scheduled_for
     ? new Date(scheduledRoute.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' })
     : '';
@@ -430,7 +431,10 @@ export const DriverView: React.FC<DriverViewProps> = ({ driverId, onLogout, togg
         <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-4">
             {scheduledDue ? (
               <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-3 rounded-lg text-sm text-blue-800 dark:text-blue-200 text-center flex items-center justify-center gap-2">
-                  <CalendarClock size={16} /> Rota agendada para hoje. Toque para iniciar.
+                  <CalendarClock size={16} />
+                  {scheduledOverdue
+                    ? <>Rota agendada para <b className="capitalize">{scheduledDateLabel}</b> (atrasada). Toque para iniciar.</>
+                    : <>Rota agendada para hoje. Toque para iniciar.</>}
               </div>
             ) : (
               <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-3 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 mb-2 text-center">
