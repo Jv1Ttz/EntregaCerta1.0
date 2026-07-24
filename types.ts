@@ -87,6 +87,34 @@ export interface Invoice {
   deleted_by?: string | null;
   /** Soft delete: motivo da exclusão, se informado */
   deleted_reason?: string | null;
+  /** Rota em que a nota foi tratada (FK routes.id). null = notas antigas / sem rota. */
+  route_id?: string | null;
+}
+
+/**
+ * Uma jornada de entrega de um motorista. Serve ao histórico (Controladoria de
+ * Rotas) e, no futuro, ao agendamento — uma rota SCHEDULED é só uma rota ainda
+ * não iniciada. Os *_count são o snapshot do resultado, gravado na finalização.
+ */
+export interface Route {
+  id: string;
+  driver_id: string;
+  vehicle_id?: string | null;
+  status: 'SCHEDULED' | 'IN_PROGRESS' | 'FINISHED' | 'CANCELLED';
+  /** Dia planejado (só no agendamento). */
+  scheduled_for?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  finished_by?: 'DRIVER' | 'GESTOR' | null;
+  delivered_count: number;
+  returned_count: number;
+  issue_count: number;
+  not_delivered_count: number;
+  leftover_count: number;
+  created_at: string;
+  /** Preenchidos por embed do PostgREST na leitura da controladoria. */
+  driver_name?: string;
+  vehicle_plate?: string | null;
 }
 
 export interface DeliveryProof {

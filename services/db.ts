@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType } from '../types';
+import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType, Route } from '../types';
 import { REASON_LABEL } from '../constants/returnReasons';
 
 /** Bucket privado das imagens de comprovante (foto, canhoto, assinatura). */
@@ -383,9 +383,22 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
 
         // Se ele já tiver notas em rota, a nova nota entra direto como 'IN_PROGRESS'
         // Caso contrário, entra como 'PENDING' aguardando o "Iniciar Rota"
-        updates.status = (count && count > 0) 
-            ? DeliveryStatus.IN_PROGRESS 
+        updates.status = (count && count > 0)
+            ? DeliveryStatus.IN_PROGRESS
             : DeliveryStatus.PENDING;
+
+        // Entrando numa rota já ativa: carimba a rota para entrar na contagem.
+        if (updates.status === DeliveryStatus.IN_PROGRESS) {
+            const { data: rota } = await supabase
+                .from('routes')
+                .select('id')
+                .eq('driver_id', driverId)
+                .eq('status', 'IN_PROGRESS')
+                .order('started_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+            if (rota?.id) updates.route_id = rota.id;
+        }
     }
 
     await supabase.from('invoices').update(updates).eq('id', invoiceId);
@@ -408,20 +421,40 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   },
 
   startRoute: async (driverId: string) => {
-    // 1. Coloca em rota tudo que estava PENDENTE deste motorista
+    const agora = new Date().toISOString();
+
+    // Veículo da jornada: pega o das notas pendentes (melhor esforço, pode ser null)
+    const { data: pend } = await supabase
+      .from('invoices')
+      .select('vehicle_id')
+      .eq('driver_id', driverId)
+      .eq('status', 'PENDING')
+      .not('vehicle_id', 'is', null)
+      .limit(1);
+    const vehicleId = pend?.[0]?.vehicle_id ?? null;
+
+    // 1. Abre a linha da rota (histórico + base do agendamento futuro)
+    const { data: rota } = await supabase
+      .from('routes')
+      .insert({ driver_id: driverId, vehicle_id: vehicleId, status: 'IN_PROGRESS', started_at: agora })
+      .select('id')
+      .single();
+    const routeId = rota?.id ?? null;
+
+    // 2. Coloca em rota tudo que estava PENDENTE, carimbando a rota
     await supabase
       .from('invoices')
-      .update({ status: 'IN_PROGRESS' })
+      .update({ status: 'IN_PROGRESS', route_id: routeId })
       .eq('driver_id', driverId)
       .eq('status', 'PENDING');
 
-    // 2. Marca a rota como ATIVA (fonte de verdade, não mais o localStorage)
+    // 3. Marca a rota como ATIVA (fonte de verdade, não mais o localStorage)
     await supabase
       .from('drivers')
-      .update({ route_started_at: new Date().toISOString() })
+      .update({ route_started_at: agora })
       .eq('id', driverId);
 
-    // 3. Notifica o gestor com o total que está em rota agora
+    // 4. Notifica o gestor com o total que está em rota agora
     const { count } = await supabase
       .from('invoices')
       .select('*', { count: 'exact', head: true })
@@ -448,6 +481,32 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     const { data: driver } = await supabase.from('drivers').select('name').eq('id', driverId).single();
     const driverName = driver?.name || 'Motorista';
 
+    // Rota ativa deste motorista (pode não existir se a rota começou antes desta
+    // feature — nesse caso só encerramos o flag, sem snapshot).
+    const { data: rota } = await supabase
+      .from('routes')
+      .select('id')
+      .eq('driver_id', driverId)
+      .eq('status', 'IN_PROGRESS')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const routeId = rota?.id ?? null;
+
+    // Contadores da rota, ANTES de mexer nas sobras. Uma consulta, agrupada por
+    // status entre as notas carimbadas com esta rota.
+    const snap = { delivered_count: 0, returned_count: 0, issue_count: 0, not_delivered_count: 0, leftover_count: 0 };
+    if (routeId) {
+      const { data: notas } = await supabase.from('invoices').select('status').eq('route_id', routeId);
+      for (const n of notas || []) {
+        if (n.status === 'DELIVERED') snap.delivered_count++;
+        else if (n.status === 'FAILED' || n.status === 'RETURNED') snap.returned_count++;
+        else if (n.status === 'ISSUE') snap.issue_count++;
+        else if (n.status === 'PENDING') snap.not_delivered_count++;   // "não entregue hoje" (valve)
+        else if (n.status === 'IN_PROGRESS') snap.leftover_count++;     // sobras (voltam à fila agora)
+      }
+    }
+
     // Notas que ainda estavam em rota (não resolvidas) voltam para a fila
     const { count: aindaEmRota } = await supabase
       .from('invoices')
@@ -461,6 +520,19 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         .update({ status: 'PENDING' })  // mantém driver_id e vehicle_id
         .eq('driver_id', driverId)
         .eq('status', 'IN_PROGRESS');
+    }
+
+    // Fecha a linha da rota com o snapshot do resultado
+    if (routeId) {
+      await supabase
+        .from('routes')
+        .update({
+          status: 'FINISHED',
+          finished_at: new Date().toISOString(),
+          finished_by: byGestor ? 'GESTOR' : 'DRIVER',
+          ...snap,
+        })
+        .eq('id', routeId);
     }
 
     // Encerra a rota
@@ -512,7 +584,43 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     await db.addLog('STATUS_CHANGE',
       `NF ${inv?.number || invoiceId} não entregue hoje${driverName ? ` (${driverName})` : ''} — Motivo: ${reason}`);
   },
-  
+
+  /**
+   * Histórico de rotas para a Controladoria de Rotas do gestor. Traz o nome do
+   * motorista e a placa via embed do PostgREST. Por padrão só rotas finalizadas
+   * (as que têm resultado); passar includeActive para incluir a em andamento.
+   */
+  getRoutes: async (includeActive = false): Promise<Route[]> => {
+    let query = supabase
+      .from('routes')
+      .select('*, drivers(name), vehicles(plate)')
+      .order('started_at', { ascending: false, nullsFirst: false });
+
+    query = includeActive
+      ? query.in('status', ['IN_PROGRESS', 'FINISHED'])
+      : query.eq('status', 'FINISHED');
+
+    const { data, error } = await query;
+    if (error) { console.error('Erro ao buscar rotas:', error); return []; }
+
+    return (data || []).map((r: any) => ({
+      ...r,
+      driver_name: r.drivers?.name ?? r.driver_id,
+      vehicle_plate: r.vehicles?.plate ?? null,
+    }));
+  },
+
+  /** Notas atualmente atribuídas a uma rota (drill-down da controladoria). */
+  getRouteInvoices: async (routeId: string): Promise<Invoice[]> => {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('route_id', routeId)
+      .order('number');
+    if (error) { console.error('Erro ao buscar notas da rota:', error); return []; }
+    return (data || []) as Invoice[];
+  },
+
   // ATUALIZADA: Agora aceita o segundo argumento 'invoiceValueLoss'
   // ATUALIZADA: Agora salva o motivo também na tabela de notas (Histórico)
   // ATUALIZADA: Com "Teste da Verdade" (Debug de RLS)

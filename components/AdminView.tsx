@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
 import { sefazApi } from '../services/sefazApi';
-import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem } from '../types';
+import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem, Route as RouteEntity } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
 import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight, Flag } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -122,6 +122,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [newVehicleMaxWeight, setNewVehicleMaxWeight] = useState<string>('');
   const [showFleetMonitor, setShowFleetMonitor] = useState(false);
   const [showControladoria, setShowControladoria] = useState(false);
+  const [controlTab, setControlTab] = useState<'notas' | 'rotas'>('notas');
+  const [routesData, setRoutesData] = useState<RouteEntity[]>([]);
+  const [routesLoading, setRoutesLoading] = useState(false);
+  const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
+  const [routeInvoices, setRouteInvoices] = useState<Record<string, Invoice[]>>({});
   const [controlDate, setControlDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -3149,6 +3154,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {controlTab === 'notas' && (<>
                   <button
                     onClick={() => {
                       const d = new Date(controlDate + 'T12:00:00');
@@ -3185,12 +3191,40 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   >
                     Hoje
                   </button>
+                  </>)}
                   <button onClick={() => setShowControladoria(false)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 ml-2">
                     <X size={20} />
                   </button>
                 </div>
               </div>
 
+              {/* Abas: Notas | Rotas */}
+              <div className="flex gap-1 px-5 pt-3 bg-slate-50 dark:bg-slate-900/40 border-b border-slate-200 dark:border-slate-700">
+                {[
+                  { id: 'notas', label: 'Controladoria de Notas', icon: <FileText size={15} /> },
+                  { id: 'rotas', label: 'Controladoria de Rotas', icon: <Flag size={15} /> },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      setControlTab(t.id as 'notas' | 'rotas');
+                      if (t.id === 'rotas') {
+                        setRoutesLoading(true);
+                        db.getRoutes().then(rs => { setRoutesData(rs); setRoutesLoading(false); });
+                      }
+                    }}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg -mb-px border-b-2 transition-colors ${
+                      controlTab === t.id
+                        ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-slate-800'
+                        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                    }`}
+                  >
+                    {t.icon} {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {controlTab === 'notas' && (<>
               {/* Totais gerais */}
               <div className="grid grid-cols-5 gap-4 p-5 border-b border-slate-200 dark:border-slate-700">
                 {[
@@ -3273,6 +3307,102 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                   </div>
                 ))}
               </div>
+              </>)}
+
+              {controlTab === 'rotas' && (
+                <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                  {routesLoading ? (
+                    <div className="py-16 text-center text-sm text-slate-500">Carregando rotas…</div>
+                  ) : routesData.length === 0 ? (
+                    <div className="py-16 text-center">
+                      <Flag size={32} className="mx-auto text-slate-300 dark:text-slate-600 mb-3" />
+                      <p className="text-sm text-slate-500 dark:text-slate-400">Nenhuma rota finalizada ainda.</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                        O histórico começa a ser registrado quando os motoristas passam a iniciar e finalizar rotas.
+                      </p>
+                    </div>
+                  ) : (
+                    routesData.map(r => {
+                      const started = r.started_at ? new Date(r.started_at) : null;
+                      const finished = r.finished_at ? new Date(r.finished_at) : null;
+                      const durMin = started && finished ? Math.round((finished.getTime() - started.getTime()) / 60000) : null;
+                      const durTxt = durMin === null ? '—' : durMin >= 60 ? `${Math.floor(durMin / 60)}h${String(durMin % 60).padStart(2, '0')}` : `${durMin}min`;
+                      const fmt = (d: Date | null) => d ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+                      const total = r.delivered_count + r.returned_count + r.issue_count + r.not_delivered_count + r.leftover_count;
+                      const isOpen = expandedRoute === r.id;
+                      return (
+                        <div key={r.id} className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                          <button
+                            onClick={() => {
+                              const next = isOpen ? null : r.id;
+                              setExpandedRoute(next);
+                              if (next && !routeInvoices[r.id]) {
+                                db.getRouteInvoices(r.id).then(inv => setRouteInvoices(prev => ({ ...prev, [r.id]: inv })));
+                              }
+                            }}
+                            className="w-full flex items-center justify-between gap-4 px-5 py-3 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="p-2 rounded-full bg-blue-600 shrink-0"><Flag size={15} className="text-white" /></div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-800 dark:text-white truncate">{r.driver_name}</span>
+                                  {r.vehicle_plate && <span className="text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full">{r.vehicle_plate}</span>}
+                                  {r.finished_by === 'GESTOR' && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium">finalizada pelo gestor</span>}
+                                </div>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {fmt(started)} → {fmt(finished)} · {durTxt} · {total} nota(s)
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <div className="hidden sm:flex items-center gap-3 text-sm">
+                                <span className="flex items-center gap-1 text-green-600 font-semibold" title="Entregues"><CheckCircle size={14} /> {r.delivered_count}</span>
+                                {r.returned_count > 0 && <span className="flex items-center gap-1 text-red-500 font-semibold" title="Devolvidas"><XCircle size={14} /> {r.returned_count}</span>}
+                                {r.issue_count > 0 && <span className="flex items-center gap-1 text-orange-500 font-semibold" title="Pendências"><AlertTriangle size={14} /> {r.issue_count}</span>}
+                                {r.not_delivered_count > 0 && <span className="flex items-center gap-1 text-slate-500 font-semibold" title="Não entregue hoje"><Clock size={14} /> {r.not_delivered_count}</span>}
+                                {r.leftover_count > 0 && <span className="flex items-center gap-1 text-slate-400 font-semibold" title="Sobras (voltaram à fila)"><ArrowDown size={14} /> {r.leftover_count}</span>}
+                              </div>
+                              {isOpen ? <ArrowUp size={16} className="text-slate-400" /> : <ArrowDown size={16} className="text-slate-400" />}
+                            </div>
+                          </button>
+
+                          {isOpen && (
+                            <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                              {!routeInvoices[r.id] ? (
+                                <div className="px-5 py-4 text-sm text-slate-500 text-center">Carregando notas…</div>
+                              ) : routeInvoices[r.id].length === 0 ? (
+                                <div className="px-5 py-4 text-sm text-slate-500 text-center">Sem notas atribuídas a esta rota.</div>
+                              ) : (
+                                routeInvoices[r.id].map(inv => {
+                                  const statusConfig: Record<string, { label: string; color: string }> = {
+                                    PENDING:     { label: 'Voltou à fila', color: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300' },
+                                    IN_PROGRESS: { label: 'Em Rota',       color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+                                    DELIVERED:   { label: 'Entregue',      color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+                                    RETURNED:    { label: 'Devolvida',     color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+                                    FAILED:      { label: 'Devolvida',     color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+                                    ISSUE:       { label: 'Pendência',     color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' },
+                                  };
+                                  const s = statusConfig[inv.status] ?? { label: inv.status, color: 'bg-slate-100 text-slate-600' };
+                                  return (
+                                    <div key={inv.id} className="flex items-center justify-between px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/30">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400 shrink-0">NF {inv.number}</span>
+                                        <span className="text-sm text-slate-700 dark:text-slate-200 truncate">{inv.customer_name}</span>
+                                      </div>
+                                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${s.color}`}>{s.label}</span>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );
