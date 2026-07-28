@@ -472,14 +472,16 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
 
   const refreshData = async () => {
     try {
-      const [inv, drv, veh] = await Promise.all([
+      const [inv, drv, veh, sched] = await Promise.all([
         db.getInvoices(),
         db.getDrivers(),
-        db.getVehicles()
+        db.getVehicles(),
+        db.getScheduledRoutes()   // alimenta o selo "Agendada" nas notas reservadas
       ]);
       setInvoices(inv);
       setDrivers(drv);
       setVehicles(veh);
+      setScheduledRoutes(sched);
       setLastUpdate(new Date());
     } catch (e) {
       console.error("Erro ao atualizar dados:", e);
@@ -1026,7 +1028,13 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
           ? (inv.status === 'FAILED' && inv.return_final_status === 'CONCLUDED')
           : filterStatus === 'FAILED_CANCELLED'
             ? (inv.status === 'FAILED' && inv.return_final_status === 'CANCELLED')
-            : inv.status === filterStatus
+            // "Agendada" é derivado: faturada + reservada a uma rota agendada
+            : filterStatus === 'SCHEDULED'
+              ? (inv.status === 'PENDING' && !!inv.route_id && scheduledRoutes.some(r => r.id === inv.route_id))
+              : filterStatus === 'PENDING'
+                // "Faturado" puro exclui as já agendadas (elas têm filtro próprio)
+                ? (inv.status === 'PENDING' && !(inv.route_id && scheduledRoutes.some(r => r.id === inv.route_id)))
+                : inv.status === filterStatus
       );
 
       // 3. Filtro de DATA DE EMISSÃO (Criação da Nota)
@@ -1045,7 +1053,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
              matchesStart && matchesEnd && 
              matchesDeliveryStart && matchesDeliveryEnd; // <--- Adicionei aqui no final
     });
-  }, [invoices, searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate]); // <--- E aqui nas dependências
+  }, [invoices, searchTerm, filterDriver, filterVehicle, filterStatus, filterStartDate, filterEndDate, filterDeliveryStartDate, filterDeliveryEndDate, scheduledRoutes]); // <--- E aqui nas dependências
 
   // 2. Cole isso logo DEPOIS do 'filteredInvoices'
 const sortedInvoices = useMemo(() => {
@@ -1715,6 +1723,28 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
   // Função que define a cor e o texto das etiquetas (Completa). Recebe a nota para devoluções finalizadas.
   const getStatusBadge = (inv: Invoice) => {
     const status = inv.status;
+
+    // "Agendada": estado DERIVADO, não existe no banco. A nota segue Faturada
+    // (ainda não saiu), mas está reservada a uma rota SCHEDULED. Derivar em vez
+    // de criar um status novo evita sumir com a nota de tudo que filtra PENDING
+    // — inclusive do app do motorista já distribuído.
+    if (status === DeliveryStatus.PENDING && inv.route_id) {
+      const rota = scheduledRoutes.find(r => r.id === inv.route_id);
+      if (rota) {
+        const dataFmt = rota.scheduled_for
+          ? new Date(rota.scheduled_for + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+          : '';
+        return (
+          <span
+            title={`Reservada para a rota de ${rota.driver_name}${dataFmt ? ` em ${dataFmt}` : ''}`}
+            className="inline-flex items-center gap-1 whitespace-nowrap px-2 py-1 rounded-full text-sm font-bold border bg-indigo-100 dark:bg-indigo-900/30 text-indigo-800 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800"
+          >
+            <CalendarClock size={13} /> Agendada{dataFmt ? ` ${dataFmt}` : ''}
+          </span>
+        );
+      }
+    }
+
     // Devolução finalizada: um único texto "Devolução concluída" ou "Devolução cancelada"
     if (status === DeliveryStatus.FAILED && inv.return_final_status === 'CONCLUDED') {
       return (
@@ -2304,6 +2334,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                  >
                    <option value="">Status</option>
                    <option value="PENDING">Faturado</option>
+                   <option value="SCHEDULED">Agendada</option>
                    <option value="IN_PROGRESS">Em Rota</option>
                    <option value="DELIVERED">Entregue</option>
                    <option value="FAILED">Devolvido</option>
