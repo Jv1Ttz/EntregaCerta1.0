@@ -134,6 +134,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleSelectedIds, setScheduleSelectedIds] = useState<string[]>([]);
   const [scheduleNoteSearch, setScheduleNoteSearch] = useState('');
+  const [expandedSchedule, setExpandedSchedule] = useState<string | null>(null);
   const [controlDate, setControlDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -3636,24 +3637,76 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     const label = d ? d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
                     const hojeStr = new Date().toISOString().split('T')[0];
                     const atrasada = !!r.scheduled_for && r.scheduled_for < hojeStr;
-                    const reservadas = invoices.filter(i => i.route_id === r.id).length;
+                    // Notas da rota: as reservadas. Sem reserva, a rota é "aberta" —
+                    // mostra as pendentes do motorista como previsão do que ele levaria.
+                    const notasReservadas = invoices.filter(i => i.route_id === r.id);
+                    const reservadas = notasReservadas.length;
+                    const notasPreview = reservadas > 0
+                      ? notasReservadas
+                      : invoices.filter(i => i.driver_id === r.driver_id && i.status === 'PENDING' && !i.deleted_at);
+                    const aberto = expandedSchedule === r.id;
                     return (
-                      <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5 border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <CalendarClock size={16} className="text-blue-500 shrink-0" />
-                          <div className="min-w-0">
-                            <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
-                            <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
-                            {atrasada && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium ml-2">atrasada</span>}
-                            <p className="text-[11px] text-slate-400 dark:text-slate-500">{reservadas > 0 ? `${reservadas} nota(s) reservada(s)` : 'todas as pendentes do dia'}</p>
+                      <div key={r.id} className="border border-blue-100 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg overflow-hidden">
+                        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <CalendarClock size={16} className="text-blue-500 shrink-0" />
+                            <div className="min-w-0">
+                              <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
+                              {atrasada && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium ml-2">atrasada</span>}
+                              <p className="text-[11px] text-slate-400 dark:text-slate-500">{reservadas > 0 ? `${reservadas} nota(s) reservada(s)` : 'todas as pendentes do dia'}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => setExpandedSchedule(aberto ? null : r.id)}
+                              className="text-xs font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-2 py-1 rounded hover:bg-blue-100/60 dark:hover:bg-blue-900/30 flex items-center gap-1"
+                            >
+                              {aberto ? 'Ver menos' : 'Ver mais'}
+                              {aberto ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+                            </button>
+                            <button
+                              onClick={() => handleCancelSchedule(r)}
+                              className="text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
+                            >
+                              Cancelar
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleCancelSchedule(r)}
-                          className="text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900/50 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 shrink-0"
-                        >
-                          Cancelar
-                        </button>
+
+                        {aberto && (
+                          <div className="border-t border-blue-100 dark:border-blue-900/40 bg-white dark:bg-slate-800">
+                            {reservadas === 0 && (
+                              <p className="px-4 py-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-100 dark:border-amber-900/30">
+                                Nenhuma nota reservada — esta rota levará as pendentes do motorista no dia. Abaixo, as pendentes de agora (pode mudar até ele iniciar).
+                              </p>
+                            )}
+                            {notasPreview.length === 0 ? (
+                              <p className="px-4 py-3 text-xs text-slate-400 text-center">Nenhuma nota atribuída a este motorista.</p>
+                            ) : (
+                              <div className="divide-y divide-slate-100 dark:divide-slate-700 max-h-60 overflow-y-auto">
+                                {notasPreview.map(inv => (
+                                  <div key={inv.id} className="flex items-center justify-between gap-3 px-4 py-2">
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <span className="text-xs font-mono text-slate-500 dark:text-slate-400 shrink-0">NF {inv.number}</span>
+                                      <div className="min-w-0">
+                                        <p className="text-sm text-slate-700 dark:text-slate-200 truncate">{inv.customer_name}</p>
+                                        <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{inv.customer_address}</p>
+                                      </div>
+                                    </div>
+                                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 shrink-0">
+                                      R$ {(inv.value ?? 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-700 flex justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                              <span>{notasPreview.length} nota(s)</span>
+                              <span>Total: R$ {notasPreview.reduce((s, i) => s + (i.value ?? 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
