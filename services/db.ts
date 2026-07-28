@@ -509,12 +509,34 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         .eq('driver_id', driverId)
         .eq('status', 'PENDING');
     } else {
-      // Aberto: todas as pendentes do motorista, carimbando a rota.
-      await supabase
+      // Aberto: as pendentes do motorista, carimbando a rota — MENOS as que
+      // estão reservadas para outra rota ainda agendada (ex.: a de amanhã).
+      // Sem esta exceção, iniciar uma rota avulsa hoje levaria embora a carga
+      // planejada para outro dia e deixaria a rota agendada órfã. A trava por
+      // data na tela do motorista evita o caso comum; isto protege a corrida
+      // (o gestor agenda enquanto a tela do motorista está desatualizada).
+      const { data: agendadas } = await supabase
+        .from('routes')
+        .select('id')
+        .eq('driver_id', driverId)
+        .eq('status', 'SCHEDULED');
+      const reservadasOutras = new Set((agendadas || []).map(r => r.id));
+
+      const { data: pendentes } = await supabase
         .from('invoices')
-        .update({ status: 'IN_PROGRESS', route_id: routeId })
+        .select('id, route_id')
         .eq('driver_id', driverId)
         .eq('status', 'PENDING');
+      const embarcar = (pendentes || [])
+        .filter(n => !n.route_id || !reservadasOutras.has(n.route_id))
+        .map(n => n.id);
+
+      if (embarcar.length) {
+        await supabase
+          .from('invoices')
+          .update({ status: 'IN_PROGRESS', route_id: routeId })
+          .in('id', embarcar);
+      }
     }
 
     // 3. Marca a rota como ATIVA (fonte de verdade, não mais o localStorage)
