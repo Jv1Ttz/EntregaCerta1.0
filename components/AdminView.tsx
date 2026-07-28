@@ -3658,7 +3658,13 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                               <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
                               <span className="text-xs text-slate-500 dark:text-slate-400 ml-2 capitalize">{label}</span>
                               {atrasada && <span className="text-[10px] bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 px-2 py-0.5 rounded-full font-medium ml-2">atrasada</span>}
-                              <p className="text-[11px] text-slate-400 dark:text-slate-500">{reservadas > 0 ? `${reservadas} nota(s) reservada(s)` : 'todas as pendentes do dia'}</p>
+                              <p className={`text-[11px] ${reservadas === 0 && notasPreview.length === 0 ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-400 dark:text-slate-500'}`}>
+                                {reservadas > 0
+                                  ? `${reservadas} nota(s) reservada(s)`
+                                  : notasPreview.length > 0
+                                    ? `rota aberta — ${notasPreview.length} pendente(s) agora`
+                                    : '⚠ rota vazia — nenhuma nota'}
+                              </p>
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
@@ -3680,9 +3686,14 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
                         {aberto && (
                           <div className="border-t border-blue-100 dark:border-blue-900/40 bg-white dark:bg-slate-800">
-                            {reservadas === 0 && (
+                            {reservadas === 0 && notasPreview.length > 0 && (
+                              <p className="px-4 py-2 text-[11px] text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-900/30">
+                                <b>Rota aberta:</b> vai levar as pendentes do motorista no dia. Estas são as de agora — pode mudar até ele iniciar.
+                              </p>
+                            )}
+                            {reservadas === 0 && notasPreview.length === 0 && (
                               <p className="px-4 py-2 text-[11px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-100 dark:border-amber-900/30">
-                                Nenhuma nota reservada — esta rota levará as pendentes do motorista no dia. Abaixo, as pendentes de agora (pode mudar até ele iniciar).
+                                <b>Rota vazia:</b> sem nota reservada e sem nenhuma pendente — do jeito que está, não levaria nada.
                               </p>
                             )}
                             {notasPreview.length === 0 ? (
