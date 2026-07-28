@@ -1372,6 +1372,10 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     const hojeStr = new Date().toISOString().split('T')[0];
     if (drv?.route_started_at && scheduleDate === hojeStr &&
         !window.confirm(`${nome} já está em rota agora. Agendar para hoje cria uma 2ª rota quando ele finalizar a atual. Continuar?`)) return;
+    // Rota vazia: sem nota marcada E sem pendente para levar no dia — não faz nada.
+    const pendentesDoDriver = invoices.filter(i => i.driver_id === scheduleDriverId && i.status === 'PENDING' && !i.deleted_at).length;
+    if (scheduleSelectedIds.length === 0 && pendentesDoDriver === 0 &&
+        !window.confirm(`${nome} não tem nenhuma nota reservada nem pendente.\n\nEsta rota ficaria VAZIA (não levaria nada). Agendar mesmo assim?`)) return;
     await db.scheduleRoute(scheduleDriverId, scheduleDate, scheduleSelectedIds);
     setShowScheduleForm(false);
     setScheduleDriverId('');
