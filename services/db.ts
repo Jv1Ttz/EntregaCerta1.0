@@ -182,6 +182,26 @@ export const db = {
     }
   },
 
+  /**
+   * "Pulso" do painel: assinatura barata do estado das notas, para detectar que
+   * algo mudou SEM baixar a lista inteira (getInvoices traz ~4 mil notas / ~5 MB).
+   *
+   * Usa count exato com `head: true` — a contagem volta no cabeçalho e o corpo
+   * da resposta vem vazio, então cada checagem custa alguns bytes. Os três
+   * contadores cobrem o que interessa ao gestor: entrega/devolução (mexe em
+   * DELIVERED e IN_PROGRESS), "não entregue hoje" e início/fim de rota (mexem em
+   * IN_PROGRESS) e importação de nota nova (mexe no total).
+   */
+  getInvoicesPulse: async (): Promise<string> => {
+    const base = () => supabase.from('invoices').select('*', { count: 'exact', head: true }).is('deleted_at', null);
+    const [total, entregues, emRota] = await Promise.all([
+      base(),
+      base().eq('status', DeliveryStatus.DELIVERED),
+      base().eq('status', DeliveryStatus.IN_PROGRESS),
+    ]);
+    return `${total.count ?? -1}|${entregues.count ?? -1}|${emRota.count ?? -1}`;
+  },
+
   getInvoices: async (): Promise<Invoice[]> => {
     // Busca TODAS as notas (sem limite de data) em múltiplos lotes,
     // para contornar o limite de ~1000 linhas por requisição do PostgREST.

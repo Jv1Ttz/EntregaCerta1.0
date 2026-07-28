@@ -181,6 +181,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
 
   const fleetIntervalRef = useRef<number | null>(null);
   const notifIntervalRef = useRef<number | null>(null);
+  /** Última assinatura conhecida do estado das notas (ver detector de mudanças). */
+  const pulsoRef = useRef<string | null>(null);
+  /** Há trabalho em andamento? Bloqueia o recarregamento automático. */
+  const painelOcupadoRef = useRef(false);
 
   
 
@@ -387,6 +391,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
     message: string;
   }>({ isOpen: false, type: null, title: '', message: '' });
 
+  // Enquanto houver modal aberto ou notas seleciondas, o gestor está no meio de
+  // algo — recarregar a lista por baixo dele perderia a seleção ou mexeria a
+  // tabela. Ref (e não estado) porque quem lê é o interval, fora do render.
+  painelOcupadoRef.current =
+    selectedInvoiceIds.size > 0 ||
+    showControladoria || showAgendamento || showFleetMonitor || showImportModal ||
+    showAddDriver || showAddVehicle || showSettings || showScanner ||
+    !!viewingProof || !!viewingManualProof || !!viewingIssue || !!editingVehicleId;
+
   useEffect(() => {
     refreshData();
     notifIntervalRef.current = window.setInterval(async () => {
@@ -402,7 +415,41 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
         if (fleetIntervalRef.current) clearInterval(fleetIntervalRef.current);
     };
   }, []);
-  
+
+  /**
+   * Mantém o painel atualizado sem torrar a cota: a cada 30s consulta só o
+   * "pulso" (contadores, resposta sem corpo) e só chama o refreshData completo
+   * — que baixa ~4 mil notas — quando algo realmente mudou. Uma entrega do
+   * motorista aparece aqui em até 30s.
+   *
+   * Não roda com a aba em segundo plano (ninguém está olhando) nem com trabalho
+   * em andamento, para não recarregar a lista por baixo do gestor.
+   */
+  useEffect(() => {
+    const checarPulso = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (painelOcupadoRef.current) return;
+      try {
+        const pulso = await db.getInvoicesPulse();
+        if (pulsoRef.current === null) { pulsoRef.current = pulso; return; } // baseline
+        if (pulso !== pulsoRef.current) {
+          pulsoRef.current = pulso;
+          await refreshData();
+        }
+      } catch { /* silencioso: rede instável não deve poluir a tela */ }
+    };
+
+    checarPulso(); // estabelece o baseline já na abertura
+    const id = window.setInterval(checarPulso, 30000);
+    window.addEventListener('focus', checarPulso);
+    document.addEventListener('visibilitychange', checarPulso);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', checarPulso);
+      document.removeEventListener('visibilitychange', checarPulso);
+    };
+  }, []);
+
   // Dashboard já inicializa com mês corrente via useState; sem useEffect extra.
 
   useEffect(() => {
