@@ -497,6 +497,19 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         .select('id')
         .single();
       routeId = rota?.id ?? null;
+      if (!routeId) {
+        // Perdeu a corrida do índice único (duplo-toque): outro start acabou de
+        // criar a rota ativa. Adota a vencedora em vez de embarcar sem carimbo.
+        const { data: vencedora } = await supabase
+          .from('routes')
+          .select('id')
+          .eq('driver_id', driverId)
+          .eq('status', 'IN_PROGRESS')
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        routeId = vencedora?.id ?? null;
+      }
     }
 
     // 2. Embarca as notas na rota.
@@ -665,7 +678,10 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     await supabase
       .from('invoices')
       .update({ status: 'PENDING' })  // volta para a fila, mantém atribuição
-      .eq('id', invoiceId);
+      .eq('id', invoiceId)
+      // Guard: só age sobre nota ainda EM ROTA. Sem isto, uma ação atrasada de
+      // tela desatualizada desfazia uma entrega já registrada (DELIVERED→PENDING).
+      .eq('status', DeliveryStatus.IN_PROGRESS);
 
     let driverName = '';
     if (inv?.driver_id) {
@@ -738,6 +754,19 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         .select('id')
         .single();
       routeId = nova?.id ?? null;
+      if (!routeId) {
+        // Perdeu a corrida do índice único (duplo-clique/duas abas): reaproveita
+        // o agendamento que acabou de ser criado e só atualiza a data.
+        const { data: vencedora } = await supabase
+          .from('routes')
+          .select('id')
+          .eq('driver_id', driverId)
+          .eq('status', 'SCHEDULED')
+          .limit(1)
+          .maybeSingle();
+        routeId = vencedora?.id ?? null;
+        if (routeId) await supabase.from('routes').update({ scheduled_for: scheduledFor }).eq('id', routeId);
+      }
     }
 
     // Reserva de notas (conjunto fechado). Reconcilia: solta as que estavam
@@ -749,10 +778,22 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       const soltar = (reservadasAtuais || []).map(r => r.id).filter(id => !selecionadas.has(id));
       if (soltar.length) await supabase.from('invoices').update({ route_id: null }).in('id', soltar);
       if (invoiceIds.length) {
-        await supabase.from('invoices')
-          .update({ route_id: routeId, driver_id: driverId })
-          .in('id', invoiceIds)
-          .eq('status', 'PENDING');
+        // Não rouba nota já reservada a OUTRA rota agendada (dois gestores/abas
+        // planejando ao mesmo tempo). A UI filtra as elegíveis, mas a tela pode
+        // estar desatualizada — a proteção de verdade fica aqui.
+        const { data: outrasAgendadas } = await supabase
+          .from('routes').select('id').eq('status', 'SCHEDULED').neq('id', routeId);
+        const protegidas = new Set((outrasAgendadas || []).map(r => r.id));
+        const { data: alvo } = await supabase.from('invoices').select('id, route_id').in('id', invoiceIds);
+        const livres = (alvo || [])
+          .filter(n => !n.route_id || n.route_id === routeId || !protegidas.has(n.route_id))
+          .map(n => n.id);
+        if (livres.length) {
+          await supabase.from('invoices')
+            .update({ route_id: routeId, driver_id: driverId })
+            .in('id', livres)
+            .eq('status', 'PENDING');
+        }
       }
     }
 
@@ -764,22 +805,32 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     await db.addLog('ASSIGNMENT', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}${detalhe}`);
   },
 
-  /** Cancela uma rota agendada (não afeta notas, pois não há reserva). */
-  cancelScheduledRoute: async (routeId: string) => {
+  /**
+   * Cancela uma rota agendada, soltando as notas reservadas de volta ao pool.
+   * Só age se a rota AINDA está SCHEDULED: se o motorista iniciou enquanto a
+   * tela do gestor estava desatualizada, o clique em "Cancelar" vira no-op —
+   * sem isto, uma rota ATIVA era marcada CANCELLED e as notas em rota perdiam
+   * o carimbo (rota órfã, sem histórico). Retorna se cancelou de fato.
+   */
+  cancelScheduledRoute: async (routeId: string): Promise<boolean> => {
     const { data: rota } = await supabase
       .from('routes')
-      .select('driver_id, scheduled_for')
+      .select('driver_id, scheduled_for, status')
       .eq('id', routeId)
       .single();
 
-    // Solta as notas reservadas (voltam ao pool livre, seguem PENDING/atribuídas).
-    await supabase.from('invoices').update({ route_id: null }).eq('route_id', routeId);
-    await supabase.from('routes').update({ status: 'CANCELLED' }).eq('id', routeId);
+    if (rota?.status !== 'SCHEDULED') return false; // já iniciou/terminou — não mexe
+
+    // Solta só as notas ainda PENDING (as reservadas); condição de status no
+    // WHERE evita apagar carimbo de nota que embarcou entre a leitura e o update.
+    await supabase.from('invoices').update({ route_id: null }).eq('route_id', routeId).eq('status', 'PENDING');
+    await supabase.from('routes').update({ status: 'CANCELLED' }).eq('id', routeId).eq('status', 'SCHEDULED');
 
     if (rota?.driver_id) {
       await db.addNotification(rota.driver_id, 'Agendamento Cancelado', 'O agendamento da sua próxima rota foi cancelado.', 'INFO');
     }
     await db.addLog('ASSIGNMENT', `Agendamento de rota cancelado`);
+    return true;
   },
 
   /** Rotas agendadas (lista do gestor), com nome do motorista e placa. */
