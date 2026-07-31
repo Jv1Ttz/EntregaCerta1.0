@@ -342,12 +342,17 @@ export const db = {
   },
 
   // Lista de notas excluídas (para tela de auditoria do gestor)
-  getDeletedInvoices: async (): Promise<Invoice[]> => {
+  getDeletedInvoices: async (limit = 50, offset = 0): Promise<Invoice[]> => {
+    // Paginado: a lixeira só cresce (nunca se auto-limpa), e sem teto o
+    // PostgREST cortaria em ~1000 e a tela renderizaria tudo de uma vez.
     const { data, error } = await supabase
       .from('invoices')
       .select('*')
       .not('deleted_at', 'is', null)
-      .order('deleted_at', { ascending: false });
+      .order('deleted_at', { ascending: false })
+      .order('id', { ascending: false }) // desempate único: sem isto, notas excluídas
+                                         // no mesmo instante duplicam/pulam entre páginas
+      .range(offset, offset + limit - 1);
 
     if (error) {
       console.error('Erro ao buscar invoices excluídas:', error);

@@ -94,6 +94,9 @@ const DevolucoesTab: React.FC = () => {
   const [filterMotorista, setFilterMotorista] = useState('');
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
+  // Render paginado: a lista de ocorrências só cresce; renderizar tudo trava.
+  const DEVOL_PAGE = 50;
+  const [visibleCount, setVisibleCount] = useState(DEVOL_PAGE);
 
   useEffect(() => {
     const load = async () => {
@@ -162,6 +165,10 @@ const DevolucoesTab: React.FC = () => {
       })
       .sort((a, b) => (b.data || '').localeCompare(a.data || ''));
   }, [invoices, proofs, drivers, search, filterTipo, filterMotorista, filterStart, filterEnd]);
+
+  // Volta ao topo da paginação sempre que o conjunto filtrado muda.
+  useEffect(() => { setVisibleCount(DEVOL_PAGE); }, [search, filterTipo, filterMotorista, filterStart, filterEnd]);
+  const visibleRows = rows.slice(0, visibleCount);
 
   const resumo = useMemo(() => ({
     total:          rows.length,
@@ -317,7 +324,9 @@ const DevolucoesTab: React.FC = () => {
       ) : (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-            {rows.length} ocorrência(s)
+            {visibleRows.length < rows.length
+              ? `Exibindo ${visibleRows.length} de ${rows.length} ocorrência(s)`
+              : `${rows.length} ocorrência(s)`}
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs md:text-sm text-left text-slate-700 dark:text-slate-200">
@@ -335,7 +344,7 @@ const DevolucoesTab: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(r => {
+                {visibleRows.map(r => {
                   const status = STATUS_CONFIG[r.inv.status];
                   return (
                   <tr key={r.inv.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60">
@@ -381,6 +390,16 @@ const DevolucoesTab: React.FC = () => {
               </tbody>
             </table>
           </div>
+          {visibleRows.length < rows.length && (
+            <div className="px-4 py-3 text-center border-t border-slate-100 dark:border-slate-700">
+              <button
+                onClick={() => setVisibleCount(c => c + DEVOL_PAGE)}
+                className="text-sm font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-4 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                Ver mais {Math.min(DEVOL_PAGE, rows.length - visibleRows.length)} de {rows.length - visibleRows.length} restante(s)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -389,9 +408,12 @@ const DevolucoesTab: React.FC = () => {
 
 // ─── Aba: Notas Excluídas ────────────────────────────────────────────────────
 
+const DELETED_PAGE = 50;
 const DeletedInvoicesTab: React.FC = () => {
   const [deletedInvoices, setDeletedInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -400,7 +422,9 @@ const DeletedInvoicesTab: React.FC = () => {
     const load = async () => {
       try {
         setLoading(true);
-        setDeletedInvoices(await db.getDeletedInvoices());
+        const primeira = await db.getDeletedInvoices(DELETED_PAGE, 0);
+        setDeletedInvoices(primeira);
+        setHasMore(primeira.length === DELETED_PAGE);
       } catch (e: any) {
         setError('Erro ao carregar notas excluídas.');
       } finally {
@@ -409,6 +433,14 @@ const DeletedInvoicesTab: React.FC = () => {
     };
     load();
   }, []);
+
+  const loadMore = async () => {
+    setLoadingMore(true);
+    const proxima = await db.getDeletedInvoices(DELETED_PAGE, deletedInvoices.length);
+    setDeletedInvoices(prev => [...prev, ...proxima]);
+    setHasMore(proxima.length === DELETED_PAGE);
+    setLoadingMore(false);
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center py-16 gap-2 text-slate-400 text-sm">
@@ -431,7 +463,7 @@ const DeletedInvoicesTab: React.FC = () => {
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
       <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
-        <span>Total: {deletedInvoices.length} nota(s) excluída(s)</span>
+        <span>{deletedInvoices.length}{hasMore ? '+' : ''} nota(s) excluída(s){hasMore ? ' carregada(s)' : ''}</span>
         <span className="text-[10px] text-slate-400">Exclusão definitiva remove a nota e comprovantes do banco.</span>
       </div>
       <div className="overflow-x-auto">
@@ -507,6 +539,17 @@ const DeletedInvoicesTab: React.FC = () => {
           </tbody>
         </table>
       </div>
+      {hasMore && (
+        <div className="px-4 py-3 text-center border-t border-slate-100 dark:border-slate-700">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="text-sm font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-4 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50"
+          >
+            {loadingMore ? 'Carregando…' : 'Ver mais'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };
