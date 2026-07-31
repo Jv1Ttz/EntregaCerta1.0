@@ -697,11 +697,18 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
    * motorista e a placa via embed do PostgREST. Por padrão só rotas finalizadas
    * (as que têm resultado); passar includeActive para incluir a em andamento.
    */
-  getRoutes: async (includeActive = false): Promise<Route[]> => {
+  /**
+   * Histórico de rotas, PAGINADO. A lista cresce ~1 rota por motorista/dia; sem
+   * limite, com o tempo o PostgREST corta em ~1000 linhas (esconde as antigas)
+   * e a tela renderiza tudo de uma vez e engasga. Traz `limit` por vez a partir
+   * de `offset` — a aba pede a próxima página com "Ver mais".
+   */
+  getRoutes: async (includeActive = false, limit = 40, offset = 0): Promise<Route[]> => {
     let query = supabase
       .from('routes')
       .select('*, drivers(name), vehicles(plate)')
-      .order('started_at', { ascending: false, nullsFirst: false });
+      .order('started_at', { ascending: false, nullsFirst: false })
+      .range(offset, offset + limit - 1);
 
     query = includeActive
       ? query.in('status', ['IN_PROGRESS', 'FINISHED'])

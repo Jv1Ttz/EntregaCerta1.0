@@ -126,6 +126,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [controlTab, setControlTab] = useState<'notas' | 'rotas'>('notas');
   const [routesData, setRoutesData] = useState<RouteEntity[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
+  const [routesHasMore, setRoutesHasMore] = useState(false);
+  const [routesLoadingMore, setRoutesLoadingMore] = useState(false);
+  const ROUTES_PAGE = 40;
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
   const [routeInvoices, setRouteInvoices] = useState<Record<string, Invoice[]>>({});
   const [scheduledRoutes, setScheduledRoutes] = useState<RouteEntity[]>([]);
@@ -1415,6 +1418,22 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
   const loadScheduledRoutes = async () => {
     setScheduledRoutes(await db.getScheduledRoutes());
+  };
+
+  // Histórico de rotas paginado: primeira página ao abrir a aba.
+  const loadRoutesFirstPage = async () => {
+    setRoutesLoading(true);
+    const primeira = await db.getRoutes(false, ROUTES_PAGE, 0);
+    setRoutesData(primeira);
+    setRoutesHasMore(primeira.length === ROUTES_PAGE); // página cheia ⇒ pode haver mais
+    setRoutesLoading(false);
+  };
+  const loadMoreRoutes = async () => {
+    setRoutesLoadingMore(true);
+    const proxima = await db.getRoutes(false, ROUTES_PAGE, routesData.length);
+    setRoutesData(prev => [...prev, ...proxima]);
+    setRoutesHasMore(proxima.length === ROUTES_PAGE);
+    setRoutesLoadingMore(false);
   };
 
   const handleScheduleRoute = async () => {
@@ -3374,10 +3393,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                     key={t.id}
                     onClick={() => {
                       setControlTab(t.id as 'notas' | 'rotas');
-                      if (t.id === 'rotas') {
-                        setRoutesLoading(true);
-                        db.getRoutes().then(rs => { setRoutesData(rs); setRoutesLoading(false); });
-                      }
+                      if (t.id === 'rotas') loadRoutesFirstPage();
                     }}
                     className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-lg -mb-px border-b-2 transition-colors ${
                       controlTab === t.id
@@ -3488,7 +3504,8 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                       </p>
                     </div>
                   ) : (
-                    routesData.map(r => {
+                    <>
+                    {routesData.map(r => {
                       const started = r.started_at ? new Date(r.started_at) : null;
                       const finished = r.finished_at ? new Date(r.finished_at) : null;
                       const durMin = started && finished ? Math.round((finished.getTime() - started.getTime()) / 60000) : null;
@@ -3565,7 +3582,19 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                           )}
                         </div>
                       );
-                    })
+                    })}
+                    {routesHasMore && (
+                      <div className="pt-2 text-center">
+                        <button
+                          onClick={loadMoreRoutes}
+                          disabled={routesLoadingMore}
+                          className="text-sm font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-4 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50"
+                        >
+                          {routesLoadingMore ? 'Carregando…' : 'Ver mais rotas'}
+                        </button>
+                      </div>
+                    )}
+                    </>
                   )}
                 </div>
               )}
