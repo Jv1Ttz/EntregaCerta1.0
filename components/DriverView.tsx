@@ -14,6 +14,24 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('Backg
 
 /** Quantas entregas do histórico entram no DOM por vez. */
 const HISTORY_PAGE_SIZE = 50;
+
+/**
+ * Valor total de um item da nota, tolerante ao formato de origem.
+ *
+ * Existem dois formatos de `items` no banco: o da importação manual do app
+ * (`value`) e o da automação por e-mail (`total_price`/`unit_price`) — que é a
+ * origem da esmagadora maioria das notas. Ler só `value` fazia toda devolução
+ * PARCIAL de nota automática calcular prejuízo R$ 0,00 e imprimir "R$ NaN" no
+ * comprovante. Não normalize isto lendo um campo só: as notas antigas dos dois
+ * formatos continuam no banco.
+ */
+const getItemValue = (item: any): number => {
+  const direto = Number(item?.value ?? item?.total_price);
+  if (Number.isFinite(direto)) return direto;
+  const unit = Number(item?.unit_price), qtd = Number(item?.quantity);
+  return Number.isFinite(unit) && Number.isFinite(qtd) ? unit * qtd : 0;
+};
+
 // --- FUNÇÃO DE LIMPEZA INTELIGENTE ---
 const getSmartGPSAddress = (fullString: string, zip: string) => {
     const parts = fullString.split("||");
@@ -861,11 +879,11 @@ const DeliveryAction: React.FC<{ invoice: Invoice, vehicle?: Vehicle, currentGeo
                 
                 // 2. Monta o texto com o valor unitário (NOVO)
                 finalReturnItemsString = selectedObjs
-                    .map(i => `[${i.code}] ${i.name} (${Number(i.quantity).toFixed(0)} ${i.unit}) - R$ ${Number(i.value).toFixed(2)}`)
+                    .map(i => `[${i.code}] ${i.name} (${Number(i.quantity).toFixed(0)} ${i.unit}) - R$ ${getItemValue(i).toFixed(2)}`)
                     .join('\n');
-                
+
                 // 3. Soma o valor dos itens selecionados (NOVO)
-                calculatedLoss = selectedObjs.reduce((acc, i) => acc + (Number(i.value) || 0), 0);
+                calculatedLoss = selectedObjs.reduce((acc, i) => acc + getItemValue(i), 0);
             } 
             else if (returnType === 'TOTAL') {
                  calculatedLoss = invoiceTotal;
