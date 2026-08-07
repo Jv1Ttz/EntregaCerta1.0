@@ -87,6 +87,8 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [trackedRoute, setTrackedRoute] = useState<{ distanceM: number; durationS: number; durationTypicalS?: number } | null>(null);
 
   // ── dados ──────────────────────────────────────────────────────────────────
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -152,11 +154,30 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [zoomedScale, setZoomedScale] = useState(1);
 
+  /**
+   * Recarrega notas, motoristas e veículos. Usada na abertura e pelo botão de
+   * atualizar — o vendedor acompanha entrega em andamento e precisa ver a baixa
+   * do motorista sem ter que recarregar a página inteira e refazer o login.
+   */
+  const refreshData = async () => {
+    setRefreshing(true);
+    try {
+      const [inv, drv, veh] = await Promise.all([db.getInvoices(), db.getDrivers(), db.getVehicles()]);
+      setInvoices(inv);
+      setDrivers(drv);
+      setVehicles(veh);
+      setLastSync(new Date());
+    } catch (e) {
+      console.error('Erro ao atualizar dados:', e);
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!authenticated) return;
-    Promise.all([db.getInvoices(), db.getDrivers(), db.getVehicles()]).then(
-      ([inv, drv, veh]) => { setInvoices(inv); setDrivers(drv); setVehicles(veh); setLoading(false); }
-    );
+    refreshData();
   }, [authenticated]);
 
   // Geocodifica notas pendentes de um veículo e atualiza o estado local
@@ -489,8 +510,21 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             </button>
           </div>
 
-          <div className="ml-auto text-xs text-slate-400 dark:text-slate-500 font-mono">
-            {activeTab === 'notas' && (loading ? '...' : `${filtered.length} de ${invoices.length} notas`)}
+          <div className="ml-auto flex items-center gap-3">
+            <div className="text-xs text-slate-400 dark:text-slate-500 font-mono hidden sm:block">
+              {activeTab === 'notas' && (loading ? '...' : `${filtered.length} de ${invoices.length} notas`)}
+            </div>
+            <button
+              onClick={refreshData}
+              disabled={refreshing || loading}
+              title={lastSync ? `Atualizado às ${lastSync.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'Atualizar dados'}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
+            >
+              <RotateCw size={15} className={refreshing ? 'animate-spin' : ''} />
+              <span className="text-xs font-medium hidden md:inline">
+                {refreshing ? 'Atualizando…' : 'Atualizar'}
+              </span>
+            </button>
           </div>
         </div>
       </div>
