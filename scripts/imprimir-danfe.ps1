@@ -1,0 +1,136 @@
+# EntregaCerta — impressão automática do DANFE
+#
+# Roda no PC do galpão. A cada ciclo pergunta ao Supabase quais notas novas
+# entraram, baixa o DANFE do Drive e manda para a impressora padrão do Windows.
+#
+# POR QUE UM AGENTE LOCAL: a ingestão roda no Google (Apps Script), que não
+# enxerga impressora nenhuma da rede. Alguma coisa precisa rodar perto do papel.
+#
+# INSTALAÇÃO (uma vez):
+#   1. Baixe o SumatraPDF portátil (gratuito) e coloque ao lado deste arquivo:
+#      https://www.sumatrapdfreader.org/download-free-pdf-viewer  → versão "portable"
+#      Renomeie para SumatraPDF.exe se vier com nome diferente.
+#   2. Preencha SUPABASE_KEY abaixo (Supabase → Settings → API → anon public).
+#   3. Teste:  powershell -ExecutionPolicy Bypass -File .\imprimir-danfe.ps1 -Simular
+#   4. Agende no Agendador de Tarefas do Windows (instruções no final do arquivo).
+
+param(
+  # Não imprime: só mostra o que faria. Use na primeira vez.
+  [switch]$Simular
+)
+
+# ─────────────────────────── CONFIGURAÇÃO ───────────────────────────
+$SUPABASE_URL = "https://oomxnhgyxaimkvdllmao.supabase.co"
+$SUPABASE_KEY = "COLE_AQUI_A_ANON_KEY"
+
+# Só imprime nota que entrou nas últimas N horas. Protege o caso de o PC ficar
+# dias desligado: ao ligar, ele não despeja o acumulado inteiro na impressora.
+$MAX_HORAS = 12
+
+# Quantas notas no máximo por ciclo — trava de segurança contra enxurrada.
+$MAX_POR_CICLO = 30
+
+$PASTA        = Split-Path -Parent $MyInvocation.MyCommand.Path
+$SUMATRA      = Join-Path $PASTA "SumatraPDF.exe"
+$ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: o que já saiu
+$ARQ_LOG       = Join-Path $PASTA "impressao.log"
+$TEMP          = Join-Path $env:TEMP "entregacerta-danfe"
+
+# ─────────────────────────── APOIO ───────────────────────────
+function Registrar($texto) {
+  $linha = "{0}  {1}" -f (Get-Date -Format "dd/MM HH:mm:ss"), $texto
+  Write-Host $linha
+  Add-Content -Path $ARQ_LOG -Value $linha -Encoding utf8
+}
+
+# O link do Drive é de visualização; para baixar o arquivo é outro endereço.
+function LinkDeDownload($url) {
+  if ($url -match "/file/d/([^/]+)") { return "https://drive.google.com/uc?export=download&id=$($Matches[1])" }
+  if ($url -match "[?&]id=([^&]+)")  { return "https://drive.google.com/uc?export=download&id=$($Matches[1])" }
+  return $url
+}
+
+# ─────────────────────────── INÍCIO ───────────────────────────
+if ($SUPABASE_KEY -eq "COLE_AQUI_A_ANON_KEY") {
+  Registrar "ERRO: SUPABASE_KEY nao preenchida. Edite o arquivo antes de rodar."
+  exit 1
+}
+if (-not $Simular -and -not (Test-Path $SUMATRA)) {
+  Registrar "ERRO: SumatraPDF.exe nao encontrado em $PASTA. Veja as instrucoes no topo do arquivo."
+  exit 1
+}
+New-Item -ItemType Directory -Force -Path $TEMP | Out-Null
+if (-not (Test-Path $ARQ_IMPRESSAS)) { New-Item -ItemType File -Path $ARQ_IMPRESSAS | Out-Null }
+
+$jaImpressas = @{}
+Get-Content $ARQ_IMPRESSAS | ForEach-Object { if ($_ -ne "") { $jaImpressas[$_] = $true } }
+
+# ── Busca as notas candidatas ──
+# status=PENDING: nota ja entregue nao precisa de papel.
+$desde = (Get-Date).ToUniversalTime().AddHours(-$MAX_HORAS).ToString("yyyy-MM-ddTHH:mm:ss")
+$filtro = "select=id,number,access_key,pdf_url,customer_name,created_at" +
+          "&created_at=gte.$desde" +
+          "&pdf_url=not.is.null" +
+          "&status=eq.PENDING" +
+          "&deleted_at=is.null" +
+          "&order=created_at.asc" +
+          "&limit=$MAX_POR_CICLO"
+
+try {
+  $notas = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/invoices?$filtro" -Headers @{
+    apikey        = $SUPABASE_KEY
+    Authorization = "Bearer $SUPABASE_KEY"
+  } -TimeoutSec 30
+} catch {
+  Registrar "ERRO ao consultar o Supabase: $($_.Exception.Message)"
+  exit 1
+}
+
+$novas = @($notas | Where-Object { -not $jaImpressas.ContainsKey($_.id) })
+if ($novas.Count -eq 0) { exit 0 }   # nada novo: sai quieto
+
+Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
+
+foreach ($nota in $novas) {
+  $destino = Join-Path $TEMP "DANFE-$($nota.access_key).pdf"
+  try {
+    Invoke-WebRequest -Uri (LinkDeDownload $nota.pdf_url) -OutFile $destino -TimeoutSec 60 | Out-Null
+
+    # Drive as vezes devolve uma pagina HTML no lugar do arquivo (permissao,
+    # aviso de virus). Imprimir isso gastaria papel com lixo.
+    $inicio = [System.IO.File]::ReadAllBytes($destino)[0..3]
+    if (-not ($inicio[0] -eq 0x25 -and $inicio[1] -eq 0x50)) {   # "%P" de %PDF
+      Registrar "  NF $($nota.number): download nao veio como PDF - sera tentado no proximo ciclo"
+      Remove-Item $destino -Force -ErrorAction SilentlyContinue
+      continue
+    }
+
+    if ($Simular) {
+      Registrar "  [SIMULACAO] NF $($nota.number) - $($nota.customer_name)"
+    } else {
+      $p = Start-Process -FilePath $SUMATRA -ArgumentList @("-print-to-default", "-silent", "`"$destino`"") -PassThru -Wait
+      if ($p.ExitCode -ne 0) { throw "SumatraPDF retornou codigo $($p.ExitCode)" }
+      Registrar "  NF $($nota.number) impressa - $($nota.customer_name)"
+    }
+
+    # So marca como impressa depois que deu certo: falha volta no proximo ciclo.
+    if (-not $Simular) { Add-Content -Path $ARQ_IMPRESSAS -Value $nota.id -Encoding utf8 }
+
+  } catch {
+    Registrar "  NF $($nota.number): FALHOU - $($_.Exception.Message)"
+  } finally {
+    Remove-Item $destino -Force -ErrorAction SilentlyContinue
+  }
+}
+
+# ─────────────────────────── AGENDAR NO WINDOWS ───────────────────────────
+# Abra o "Agendador de Tarefas" e crie uma tarefa basica:
+#   Nome      : EntregaCerta - Imprimir DANFE
+#   Disparador: Ao fazer logon  →  depois marque "Repetir a cada 5 minutos"
+#               por "Duração: Indefinidamente"
+#   Ação      : Iniciar um programa
+#     Programa: powershell.exe
+#     Argumentos: -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\caminho\imprimir-danfe.ps1"
+#   Marque    : "Executar estando o usuario conectado ou nao" (opcional)
+#
+# Para conferir o que aconteceu, abra o arquivo impressao.log ao lado do script.
