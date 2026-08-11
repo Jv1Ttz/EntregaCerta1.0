@@ -128,6 +128,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
   const [routesData, setRoutesData] = useState<RouteEntity[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
   const [routesHasMore, setRoutesHasMore] = useState(false);
+  const [openRoutes, setOpenRoutes] = useState<RouteEntity[]>([]);
   const [routesLoadingMore, setRoutesLoadingMore] = useState(false);
   const ROUTES_PAGE = 40;
   const [expandedRoute, setExpandedRoute] = useState<string | null>(null);
@@ -1397,10 +1398,25 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
   // Histórico de rotas paginado: primeira página ao abrir a aba.
   const loadRoutesFirstPage = async () => {
     setRoutesLoading(true);
-    const primeira = await db.getRoutes(false, ROUTES_PAGE, 0);
+    const [primeira, abertas] = await Promise.all([
+      db.getRoutes(false, ROUTES_PAGE, 0),
+      db.getOpenRoutes(),
+    ]);
     setRoutesData(primeira);
+    setOpenRoutes(abertas);
     setRoutesHasMore(primeira.length === ROUTES_PAGE); // página cheia ⇒ pode haver mais
     setRoutesLoading(false);
+  };
+
+  /** Encerra a rota aberta direto da controladoria (mesma ação do Gerir Motoristas). */
+  const handleFinishOpenRoute = async (rota: RouteEntity) => {
+    const emRota = invoices.filter(i => i.route_id === rota.id && i.status === DeliveryStatus.IN_PROGRESS).length;
+    const aviso = emRota > 0
+      ? `\n\n${emRota} nota(s) ainda em rota voltarão para a fila (mantendo o motorista).`
+      : '';
+    if (!window.confirm(`Encerrar a rota de ${rota.driver_name}?${aviso}`)) return;
+    await db.finishRoute(rota.driver_id, true);
+    await Promise.all([loadRoutesFirstPage(), refreshData()]);
   };
   const loadMoreRoutes = async () => {
     setRoutesLoadingMore(true);
@@ -3467,6 +3483,54 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
               {controlTab === 'rotas' && (
                 <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                  {/* Rotas em aberto: enquanto não fecham, seguem recebendo nota nova */}
+                  {openRoutes.length > 0 && (
+                    <div className="border border-amber-200 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-900/10 rounded-xl overflow-hidden mb-2">
+                      <div className="px-4 py-2.5 border-b border-amber-200 dark:border-amber-900/40 flex items-center gap-2">
+                        <Clock size={15} className="text-amber-600 dark:text-amber-400" />
+                        <span className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                          {openRoutes.length} rota(s) em aberto
+                        </span>
+                        <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+                          — continuam recebendo notas até serem encerradas
+                        </span>
+                      </div>
+                      <div className="divide-y divide-amber-100 dark:divide-amber-900/30">
+                        {openRoutes.map(r => {
+                          const horas = r.started_at
+                            ? Math.round((Date.now() - new Date(r.started_at).getTime()) / 3600000)
+                            : 0;
+                          const esquecida = horas >= 24;
+                          const notas = invoices.filter(i => i.route_id === r.id).length;
+                          const emRota = invoices.filter(i => i.route_id === r.id && i.status === DeliveryStatus.IN_PROGRESS).length;
+                          const tempo = horas >= 24 ? `${Math.floor(horas / 24)}d ${horas % 24}h` : `${horas}h`;
+                          return (
+                            <div key={r.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-800 dark:text-white">{r.driver_name}</span>
+                                  {r.vehicle_plate && <span className="text-xs bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-full">{r.vehicle_plate}</span>}
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${esquecida ? 'bg-amber-200 text-amber-900 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+                                    aberta há {tempo}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  {notas} nota(s) acumulada(s){emRota > 0 ? ` · ${emRota} ainda em rota` : ' · todas resolvidas'}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => handleFinishOpenRoute(r)}
+                                className="text-xs font-semibold text-white bg-slate-800 dark:bg-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-900 dark:hover:bg-slate-600 shrink-0"
+                              >
+                                Encerrar
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {routesLoading ? (
                     <div className="py-16 text-center text-sm text-slate-500">Carregando rotas…</div>
                   ) : routesData.length === 0 ? (
@@ -3798,7 +3862,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                               </div>
                             )}
                             <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-700 flex justify-between text-[11px] text-slate-500 dark:text-slate-400">
-                              <span>{notasPreview.length} nota(s)</span>
+                              <span>{notasPreview.length} nota(s){notasPreview.length >= 60 ? ' (mostrando as 60 primeiras)' : ''}</span>
                               <span>Total: R$ {notasPreview.reduce((s, i) => s + (i.value ?? 0), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                             </div>
                           </div>

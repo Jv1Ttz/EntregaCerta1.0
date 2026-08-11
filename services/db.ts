@@ -729,15 +729,48 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     }));
   },
 
-  /** Notas atualmente atribuídas a uma rota (drill-down da controladoria). */
-  getRouteInvoices: async (routeId: string): Promise<Invoice[]> => {
+  /**
+   * Notas de uma rota (drill-down da controladoria), com teto.
+   * Rota que fica aberta por dias vai acumulando nota: já houve uma com 63.
+   * Sem limite, expandir uma dessas despeja tudo na tela de uma vez.
+   */
+  getRouteInvoices: async (routeId: string, limit = 60): Promise<Invoice[]> => {
     const { data, error } = await supabase
       .from('invoices')
       .select('*')
       .eq('route_id', routeId)
-      .order('number');
+      .order('number')
+      .limit(limit);
     if (error) { console.error('Erro ao buscar notas da rota:', error); return []; }
     return (data || []) as Invoice[];
+  },
+
+  /** Quantas notas a rota tem no total (o drill-down mostra só as primeiras). */
+  countRouteInvoices: async (routeId: string): Promise<number> => {
+    const { count } = await supabase
+      .from('invoices')
+      .select('*', { count: 'exact', head: true })
+      .eq('route_id', routeId);
+    return count ?? 0;
+  },
+
+  /**
+   * Rotas ainda abertas, da mais antiga para a mais recente. Rota esquecida em
+   * aberto continua recebendo nota nova do motorista — o gestor precisa ver
+   * quais estão penduradas para poder encerrar.
+   */
+  getOpenRoutes: async (): Promise<Route[]> => {
+    const { data, error } = await supabase
+      .from('routes')
+      .select('*, drivers(name), vehicles(plate)')
+      .eq('status', 'IN_PROGRESS')
+      .order('started_at', { ascending: true });
+    if (error) { console.error('Erro ao buscar rotas abertas:', error); return []; }
+    return (data || []).map((r: any) => ({
+      ...r,
+      driver_name: r.drivers?.name ?? r.driver_id,
+      vehicle_plate: r.vehicles?.plate ?? null,
+    }));
   },
 
   /**
