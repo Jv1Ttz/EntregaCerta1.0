@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
+import { geocodeInvoice as geocodeInvoiceShared } from '../services/geocode';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem, Route as RouteEntity } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
@@ -540,36 +541,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
 
   // --- INÍCIO DO BLOCO (COLE APENAS UMA VEZ) ---
 
-  // 1. Função Inteligente de Geocodificação
+  // Geocodificação: services/geocode.ts (compartilhada com Vendedor e Roteirização)
   const geocodeInvoice = async (invoice: Invoice) => {
-    // Se já tem coordenadas, não gasta API, só devolve a nota
-    if (invoice.lat && invoice.lng) return invoice;
-
-    try {
-      // Limpa o endereço para facilitar a busca (remove o "|| OBS" se houver)
-      const cleanAddress = invoice.customer_address.split('||')[0]; 
-      const query = encodeURIComponent(`${cleanAddress}, Brasil`);
-      
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${query}.json?access_token=${MAPBOX_TOKEN}&limit=1`;
-      
-      const res = await fetch(url);
-      const data = await res.json();
-
-      if (data.features && data.features.length > 0) {
-        const [lng, lat] = data.features[0].center;
-        
-        // Salva no banco para o futuro
-        if (db.updateInvoiceLocation) {
-             await db.updateInvoiceLocation(invoice.id, lat, lng);
-        }
-        
-        return { ...invoice, lat, lng };
-      }
-    } catch (error) {
-      console.error(`Erro ao localizar nota ${invoice.number}:`, error);
-    }
-    // Se falhar, devolve a nota sem GPS mesmo
-    return invoice;
+    return geocodeInvoiceShared(invoice);
   };
 
   // 2a. Ação de Clique no Driver (legado — mantido para compatibilidade)

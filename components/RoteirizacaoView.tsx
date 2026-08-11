@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { db } from '../services/db';
+import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Vehicle, Zone } from '../types';
 import {
   Route, Truck, Loader2, CheckCircle, Package,
@@ -165,21 +166,8 @@ function fmtDur(seconds: number): string {
   return `${h}h ${m < 10 ? '0' : ''}${m}min`;
 }
 
-async function geocodeInvoice(invoice: Invoice): Promise<Invoice> {
-  if (invoice.lat && invoice.lng) return invoice;
-  try {
-    const clean = invoice.customer_address.split('||')[0];
-    const q = encodeURIComponent(`${clean}, Brasil`);
-    const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${q}.json?access_token=${MAPBOX_TOKEN}&limit=1`);
-    const data = await res.json();
-    if (data.features?.length > 0) {
-      const [lng, lat] = data.features[0].center;
-      await db.updateInvoiceLocation(invoice.id, lat, lng);
-      return { ...invoice, lat, lng };
-    }
-  } catch { /* silencioso */ }
-  return invoice;
-}
+// Geocodificação vive em services/geocode.ts — as três telas usam a mesma, com
+// as validações que evitam o pino genérico no centro da cidade.
 
 // ── Tipos de drag ───────────────────────────────────────────────────────────
 

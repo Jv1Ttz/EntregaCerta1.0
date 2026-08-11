@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
+import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
 import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite, Navigation2 } from 'lucide-react';
@@ -180,22 +181,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     refreshData();
   }, [authenticated]);
 
-  // Geocodifica notas pendentes de um veículo e atualiza o estado local
-  const geocodeInvoice = async (invoice: Invoice): Promise<Invoice> => {
-    if (invoice.lat && invoice.lng) return invoice;
-    try {
-      const clean = invoice.customer_address.split('||')[0];
-      const query = encodeURIComponent(`${clean}, Brasil`);
-      const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${query}.json?access_token=${MAPBOX_TOKEN}&limit=1`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.features?.length > 0) {
-        const [lng, lat] = data.features[0].center;
-        return { ...invoice, lat, lng };
-      }
-    } catch { /* silencioso */ }
-    return invoice;
-  };
+  // Geocodificação: services/geocode.ts (compartilhada com Gestor e Roteirização)
 
   const handleSelectVehicle = async (vehicleId: string, lat?: number, lng?: number, forceSelect = false) => {
     const willDeselect = !forceSelect && selectedVehicleId === vehicleId;
