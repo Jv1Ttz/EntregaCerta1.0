@@ -59,6 +59,21 @@ if (-not $Simular -and -not (Test-Path $SUMATRA)) {
   Registrar "ERRO: SumatraPDF.exe nao encontrado em $PASTA. Veja as instrucoes no topo do arquivo."
   exit 1
 }
+# Trava contra execucoes sobrepostas. Rodando a cada 1 minuto, um ciclo que
+# demore mais que isso (varias notas para baixar e imprimir) seria atropelado
+# pelo seguinte, e a mesma nota sairia duas vezes na bandeja.
+$trava = New-Object System.Threading.Mutex($false, "Global\EntregaCertaImpressaoDANFE")
+$assumiu = $false
+try {
+  $assumiu = $trava.WaitOne(0)
+} catch [System.Threading.AbandonedMutexException] {
+  # Ciclo anterior morreu sem liberar (PC desligado no meio). A trava e nossa.
+  $assumiu = $true
+}
+if (-not $assumiu) { exit 0 }   # ja tem um ciclo rodando: sai quieto
+
+try {
+
 New-Item -ItemType Directory -Force -Path $TEMP | Out-Null
 if (-not (Test-Path $ARQ_IMPRESSAS)) { New-Item -ItemType File -Path $ARQ_IMPRESSAS | Out-Null }
 
@@ -123,14 +138,25 @@ foreach ($nota in $novas) {
   }
 }
 
+} finally {
+  # Libera a trava mesmo se algo acima falhar ou chamar exit.
+  try { $trava.ReleaseMutex() } catch {}
+  $trava.Dispose()
+}
+
 # ─────────────────────────── AGENDAR NO WINDOWS ───────────────────────────
 # Abra o "Agendador de Tarefas" e crie uma tarefa basica:
 #   Nome      : EntregaCerta - Imprimir DANFE
-#   Disparador: Ao fazer logon  →  depois marque "Repetir a cada 5 minutos"
-#               por "Duração: Indefinidamente"
+#   Disparador: Ao fazer logon
 #   Ação      : Iniciar um programa
-#     Programa: powershell.exe
+#     Programa  : powershell.exe
 #     Argumentos: -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\caminho\imprimir-danfe.ps1"
-#   Marque    : "Executar estando o usuario conectado ou nao" (opcional)
+#
+# Depois de criar, abra as Propriedades da tarefa → aba Disparadores → Editar →
+# marque "Repetir a cada:" e DIGITE "1 minuto" (a lista sugere 5 minutos, mas o
+# campo aceita texto), com "Duração: Indefinidamente".
+#
+# Ainda em Propriedades → aba Configurações, deixe marcado
+# "Não iniciar uma nova instância" em "Se a tarefa já estiver em execução".
 #
 # Para conferir o que aconteceu, abra o arquivo impressao.log ao lado do script.
