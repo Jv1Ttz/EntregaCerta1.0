@@ -1408,16 +1408,6 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
     setRoutesLoading(false);
   };
 
-  /** Encerra a rota aberta direto da controladoria (mesma ação do Gerir Motoristas). */
-  const handleFinishOpenRoute = async (rota: RouteEntity) => {
-    const emRota = invoices.filter(i => i.route_id === rota.id && i.status === DeliveryStatus.IN_PROGRESS).length;
-    const aviso = emRota > 0
-      ? `\n\n${emRota} nota(s) ainda em rota voltarão para a fila (mantendo o motorista).`
-      : '';
-    if (!window.confirm(`Encerrar a rota de ${rota.driver_name}?${aviso}`)) return;
-    await db.finishRoute(rota.driver_id, true);
-    await Promise.all([loadRoutesFirstPage(), refreshData()]);
-  };
   const loadMoreRoutes = async () => {
     setRoutesLoadingMore(true);
     const proxima = await db.getRoutes(false, ROUTES_PAGE, routesData.length);
@@ -3492,7 +3482,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                           {openRoutes.length} rota(s) em aberto
                         </span>
                         <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
-                          — continuam recebendo notas até serem encerradas
+                          — continuam recebendo notas até o motorista finalizar
                         </span>
                       </div>
                       <div className="divide-y divide-amber-100 dark:divide-amber-900/30">
@@ -3518,12 +3508,6 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                                   {notas} nota(s) acumulada(s){emRota > 0 ? ` · ${emRota} ainda em rota` : ' · todas resolvidas'}
                                 </p>
                               </div>
-                              <button
-                                onClick={() => handleFinishOpenRoute(r)}
-                                className="text-xs font-semibold text-white bg-slate-800 dark:bg-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-900 dark:hover:bg-slate-600 shrink-0"
-                              >
-                                Encerrar
-                              </button>
                             </div>
                           );
                         })}
