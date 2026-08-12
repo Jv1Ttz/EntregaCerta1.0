@@ -30,6 +30,12 @@ $MAX_HORAS = 12
 # Quantas notas no máximo por ciclo — trava de segurança contra enxurrada.
 $MAX_POR_CICLO = 30
 
+# Quanto esperar pela impressora antes de desistir de uma nota (segundos).
+# Com a impressora offline o SumatraPDF fica pendurado: medido, chegou a 4 min
+# numa nota só. Sem este limite o agente trava segurando a trava e nunca mais
+# processa nada.
+$TIMEOUT_IMPRESSAO_S = 90
+
 $PASTA        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SUMATRA      = Join-Path $PASTA "SumatraPDF.exe"
 $ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: o que já saiu
@@ -51,8 +57,11 @@ function LinkDeDownload($url) {
 }
 
 # ─────────────────────────── INÍCIO ───────────────────────────
-if ($SUPABASE_KEY -eq "COLE_AQUI_A_ANON_KEY") {
-  Registrar "ERRO: SUPABASE_KEY nao preenchida. Edite o arquivo antes de rodar."
+# Reconhece a chave pelo formato (JWT começa com "eyJ") em vez de comparar com o
+# texto do placeholder: quem cola a chave com "substituir tudo" trocaria as duas
+# ocorrências e desarmaria a checagem sem perceber.
+if ($SUPABASE_KEY -notlike "eyJ*") {
+  Registrar "ERRO: SUPABASE_KEY nao preenchida (deve comecar com 'eyJ'). Edite o arquivo antes de rodar."
   exit 1
 }
 if (-not $Simular -and -not (Test-Path $SUMATRA)) {
@@ -123,7 +132,14 @@ foreach ($nota in $novas) {
     if ($Simular) {
       Registrar "  [SIMULACAO] NF $($nota.number) - $($nota.customer_name)"
     } else {
-      $p = Start-Process -FilePath $SUMATRA -ArgumentList @("-print-to-default", "-silent", "`"$destino`"") -PassThru -Wait
+      $p = Start-Process -FilePath $SUMATRA -ArgumentList @("-print-to-default", "-silent", "`"$destino`"") -PassThru
+      if (-not $p.WaitForExit($TIMEOUT_IMPRESSAO_S * 1000)) {
+        try { $p.Kill() } catch {}
+        # Impressora provavelmente offline. Nao adianta tentar as proximas agora:
+        # aborta o ciclo e deixa tudo para a proxima rodada, com a nota nao marcada.
+        Registrar "  NF $($nota.number): impressora nao respondeu em $TIMEOUT_IMPRESSAO_S s - ciclo abortado"
+        break
+      }
       if ($p.ExitCode -ne 0) { throw "SumatraPDF retornou codigo $($p.ExitCode)" }
       Registrar "  NF $($nota.number) impressa - $($nota.customer_name)"
     }
