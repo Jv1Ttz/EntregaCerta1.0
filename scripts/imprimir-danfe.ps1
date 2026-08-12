@@ -37,6 +37,10 @@ $MAX_HORAS = 12
 # Quantas notas no máximo por ciclo — trava de segurança contra enxurrada.
 $MAX_POR_CICLO = 30
 
+# Prazo máximo de um ciclo. Passou disso, ele se encerra sozinho: rodada travada
+# não pode segurar o mutex e derrubar a impressão das notas seguintes.
+$PRAZO_MAXIMO_SEG = 180
+
 # Quanto esperar pela impressora antes de desistir de uma nota (segundos).
 # Com a impressora offline o SumatraPDF fica pendurado: medido, chegou a 4 min
 # numa nota só. Sem este limite o agente trava segurando a trava e nunca mais
@@ -50,6 +54,38 @@ $ARQ_LOG       = Join-Path $PASTA "impressao.log"
 $TEMP          = Join-Path $env:TEMP "entregacerta-danfe"
 
 # ─────────────────────────── APOIO ───────────────────────────
+
+# Invoke-RestMethod/Invoke-WebRequest do PowerShell 5.1 ignoram -TimeoutSec quando
+# a conexao trava no meio (handshake ou leitura parada). Ja aconteceu: uma rodada
+# ficou 12 minutos pendurada na consulta, segurando o mutex, e toda rodada
+# seguinte saiu calada — a impressao parou sem nenhum erro no log.
+# HttpWebRequest permite prazo no socket, que e respeitado de verdade.
+function BuscarComPrazo($url, $cabecalhos, $segundos = 25) {
+  $req = [System.Net.HttpWebRequest]::Create($url)
+  $req.Method = 'GET'
+  $req.Timeout = $segundos * 1000            # conexao + envio
+  $req.ReadWriteTimeout = $segundos * 1000   # leitura da resposta
+  foreach ($k in $cabecalhos.Keys) { $req.Headers.Add($k, $cabecalhos[$k]) }
+  $resp = $req.GetResponse()
+  try {
+    $sr = New-Object IO.StreamReader($resp.GetResponseStream())
+    return $sr.ReadToEnd()
+  } finally { $resp.Close() }
+}
+
+function BaixarComPrazo($url, $destino, $segundos = 45) {
+  $req = [System.Net.HttpWebRequest]::Create($url)
+  $req.Method = 'GET'
+  $req.Timeout = $segundos * 1000
+  $req.ReadWriteTimeout = $segundos * 1000
+  $req.AllowAutoRedirect = $true
+  $resp = $req.GetResponse()
+  try {
+    $fs = [IO.File]::Create($destino)
+    try { $resp.GetResponseStream().CopyTo($fs) } finally { $fs.Close() }
+  } finally { $resp.Close() }
+}
+
 function Registrar($texto) {
   $linha = "{0}  {1}" -f (Get-Date -Format "dd/MM HH:mm:ss"), $texto
   Write-Host $linha
@@ -97,6 +133,15 @@ try {
 }
 if (-not $assumiu) { exit 0 }   # ja tem um ciclo rodando: sai quieto
 
+# Cinto de seguranca: se este ciclo passar do prazo, ele se mata. Sem isto, uma
+# rodada travada segura o mutex para sempre e a impressao para em silencio —
+# a tarefa agendada nao tem limite de tempo proprio (padrao do schtasks e 72h).
+$vigia = Start-Job -ArgumentList $PID, $PRAZO_MAXIMO_SEG -ScriptBlock {
+  param($alvo, $prazo)
+  Start-Sleep -Seconds $prazo
+  Stop-Process -Id $alvo -Force -ErrorAction SilentlyContinue
+}
+
 try {
 
 New-Item -ItemType Directory -Force -Path $TEMP | Out-Null
@@ -117,10 +162,11 @@ $filtro = "select=id,number,access_key,pdf_url,customer_name,created_at" +
           "&limit=$MAX_POR_CICLO"
 
 try {
-  $notas = Invoke-RestMethod -Uri "$SUPABASE_URL/rest/v1/invoices?$filtro" -Headers @{
+  $json  = BuscarComPrazo "$SUPABASE_URL/rest/v1/invoices?$filtro" @{
     apikey        = $SUPABASE_KEY
     Authorization = "Bearer $SUPABASE_KEY"
-  } -TimeoutSec 30
+  } 25
+  $notas = $json | ConvertFrom-Json
 } catch {
   Registrar "ERRO ao consultar o Supabase: $($_.Exception.Message)"
   exit 1
@@ -134,7 +180,7 @@ Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
 foreach ($nota in $novas) {
   $destino = Join-Path $TEMP "DANFE-$($nota.access_key).pdf"
   try {
-    Invoke-WebRequest -Uri (LinkDeDownload $nota.pdf_url) -OutFile $destino -TimeoutSec 60 | Out-Null
+    BaixarComPrazo (LinkDeDownload $nota.pdf_url) $destino 45
 
     # Drive as vezes devolve uma pagina HTML no lugar do arquivo (permissao,
     # aviso de virus). Imprimir isso gastaria papel com lixo.
@@ -177,6 +223,7 @@ foreach ($nota in $novas) {
 
 } finally {
   # Libera a trava mesmo se algo acima falhar ou chamar exit.
+  if ($vigia) { Stop-Job $vigia -ErrorAction SilentlyContinue; Remove-Job $vigia -Force -ErrorAction SilentlyContinue }
   try { $trava.ReleaseMutex() } catch {}
   $trava.Dispose()
 }
