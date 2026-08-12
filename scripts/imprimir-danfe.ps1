@@ -51,6 +51,7 @@ $PASTA        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SUMATRA      = Join-Path $PASTA "SumatraPDF.exe"
 $ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: o que já saiu
 $ARQ_LOG       = Join-Path $PASTA "impressao.log"
+$ARQ_PONTO     = Join-Path $PASTA "ultima-rodada.txt"  # batida de ponto p/ o vigia
 $TEMP          = Join-Path $env:TEMP "entregacerta-danfe"
 
 # ─────────────────────────── APOIO ───────────────────────────
@@ -84,6 +85,13 @@ function BaixarComPrazo($url, $destino, $segundos = 45) {
     $fs = [IO.File]::Create($destino)
     try { $resp.GetResponseStream().CopyTo($fs) } finally { $fs.Close() }
   } finally { $resp.Close() }
+}
+
+# Marca que um ciclo chegou ao fim com saude. O vigia usa este arquivo para
+# saber se o agente esta vivo: ciclo travado nunca bate o ponto, e e justamente
+# a falha silenciosa que precisamos enxergar (a fila para sem erro no log).
+function BaterPonto {
+  try { Set-Content -Path $ARQ_PONTO -Value (Get-Date -Format 'o') -Encoding utf8 } catch {}
 }
 
 function Registrar($texto) {
@@ -173,7 +181,7 @@ try {
 }
 
 $novas = @($notas | Where-Object { -not $jaImpressas.ContainsKey($_.id) })
-if ($novas.Count -eq 0) { exit 0 }   # nada novo: sai quieto
+if ($novas.Count -eq 0) { BaterPonto; exit 0 }   # nada novo: sai quieto, mas vivo
 
 Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
 
@@ -220,6 +228,8 @@ foreach ($nota in $novas) {
     Remove-Item $destino -Force -ErrorAction SilentlyContinue
   }
 }
+
+BaterPonto   # ciclo completo: o agente esta vivo
 
 } finally {
   # Libera a trava mesmo se algo acima falhar ou chamar exit.
