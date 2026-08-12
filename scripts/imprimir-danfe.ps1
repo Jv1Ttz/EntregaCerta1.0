@@ -23,6 +23,13 @@ param(
 $SUPABASE_URL = "https://oomxnhgyxaimkvdllmao.supabase.co"
 $SUPABASE_KEY = "COLE_AQUI_A_ANON_KEY"
 
+# Nome EXATO da impressora (como aparece em Dispositivos e Impressoras).
+# Vazio = usa a padrao do Windows.
+# Escolher pelo nome importa: a maquina pode ter mais de uma WF-M5799 instalada,
+# e a padrao pode ser justamente a que nao responde.
+# Para listar os nomes:  Get-Printer | Select-Object Name
+$IMPRESSORA = "logistica (WF-M5799 Series)"
+
 # Só imprime nota que entrou nas últimas N horas. Protege o caso de o PC ficar
 # dias desligado: ao ligar, ele não despeja o acumulado inteiro na impressora.
 $MAX_HORAS = 12
@@ -67,6 +74,15 @@ if ($SUPABASE_KEY -notlike "eyJ*") {
 if (-not $Simular -and -not (Test-Path $SUMATRA)) {
   Registrar "ERRO: SumatraPDF.exe nao encontrado em $PASTA. Veja as instrucoes no topo do arquivo."
   exit 1
+}
+# Nome de impressora errado faria o SumatraPDF falhar sem dizer o porque.
+if (-not $Simular -and $IMPRESSORA) {
+  $existe = Get-Printer -Name $IMPRESSORA -ErrorAction SilentlyContinue
+  if (-not $existe) {
+    Registrar "ERRO: impressora '$IMPRESSORA' nao encontrada neste PC."
+    Registrar "       Instaladas: $((Get-Printer | Select-Object -ExpandProperty Name) -join ' | ')"
+    exit 1
+  }
 }
 # Trava contra execucoes sobrepostas. Rodando a cada 1 minuto, um ciclo que
 # demore mais que isso (varias notas para baixar e imprimir) seria atropelado
@@ -132,7 +148,12 @@ foreach ($nota in $novas) {
     if ($Simular) {
       Registrar "  [SIMULACAO] NF $($nota.number) - $($nota.customer_name)"
     } else {
-      $p = Start-Process -FilePath $SUMATRA -ArgumentList @("-print-to-default", "-silent", "`"$destino`"") -PassThru
+      $argsImpressao = if ($IMPRESSORA) {
+        @("-print-to", "`"$IMPRESSORA`"", "-silent", "`"$destino`"")
+      } else {
+        @("-print-to-default", "-silent", "`"$destino`"")
+      }
+      $p = Start-Process -FilePath $SUMATRA -ArgumentList $argsImpressao -PassThru
       if (-not $p.WaitForExit($TIMEOUT_IMPRESSAO_S * 1000)) {
         try { $p.Kill() } catch {}
         # Impressora provavelmente offline. Nao adianta tentar as proximas agora:
