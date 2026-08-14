@@ -25,7 +25,10 @@ $SUPABASE_KEY = "COLE_AQUI_A_ANON_KEY"
 
 # ── Etiqueta de expedição ──
 # Impressora térmica própria, que fala ZPL direto pela rede (sem driver, sem PDF).
-$IMPRIMIR_ETIQUETA = $true
+# Desligada por padrao: enquanto a etiqueta nao estiver homologada pelo gestor,
+# ligar isso faz sair papel na termica a cada nota nova, de minuto em minuto.
+# So vire para $true depois do de-acordo sobre o layout.
+$IMPRIMIR_ETIQUETA = $false
 $IP_ETIQUETA       = '10.9.74.176'
 $PORTA_ETIQUETA    = 9100
 $REMETENTE         = 'ELLO ATACADAO DE PRODUTOS LTDA'
