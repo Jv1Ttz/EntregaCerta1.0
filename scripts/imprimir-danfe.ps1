@@ -23,6 +23,15 @@ param(
 $SUPABASE_URL = "https://oomxnhgyxaimkvdllmao.supabase.co"
 $SUPABASE_KEY = "COLE_AQUI_A_ANON_KEY"
 
+# ── Etiqueta de expedição ──
+# Impressora térmica própria, que fala ZPL direto pela rede (sem driver, sem PDF).
+$IMPRIMIR_ETIQUETA = $true
+$IP_ETIQUETA       = '10.9.74.176'
+$PORTA_ETIQUETA    = 9100
+$REMETENTE         = 'ELLO ATACADAO DE PRODUTOS LTDA'
+$ETIQUETA_LARGURA  = 480   # 60mm a 203dpi (8 pontos por mm)
+$ETIQUETA_ALTURA   = 720   # 90mm
+
 # Nome EXATO da impressora (como aparece em Dispositivos e Impressoras).
 # Vazio = usa a padrao do Windows.
 # Escolher pelo nome importa: a maquina pode ter mais de uma WF-M5799 instalada,
@@ -49,7 +58,12 @@ $TIMEOUT_IMPRESSAO_S = 90
 
 $PASTA        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SUMATRA      = Join-Path $PASTA "SumatraPDF.exe"
-$ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: o que já saiu
+$ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: DANFEs que já saíram
+# Etiqueta tem memória PRÓPRIA de propósito. Se as duas compartilhassem o mesmo
+# controle, uma falha só (impressora de etiqueta offline, por exemplo) faria o
+# DANFE ser reimpresso junto na tentativa seguinte — e a cada minuto, virando
+# enxurrada de papel. Separados, cada um repete só o que faltou.
+$ARQ_ETIQUETAS = Join-Path $PASTA "etiquetas.txt"
 $ARQ_LOG       = Join-Path $PASTA "impressao.log"
 $ARQ_PONTO     = Join-Path $PASTA "ultima-rodada.txt"  # batida de ponto p/ o vigia
 $TEMP          = Join-Path $env:TEMP "entregacerta-danfe"
@@ -98,6 +112,98 @@ function Registrar($texto) {
   $linha = "{0}  {1}" -f (Get-Date -Format "dd/MM HH:mm:ss"), $texto
   Write-Host $linha
   Add-Content -Path $ARQ_LOG -Value $linha -Encoding utf8
+}
+
+# ─────────────────────────── ETIQUETA (ZPL) ───────────────────────────
+
+# ZPL trata ^ e ~ como início de comando, e acento não sai no charset padrão.
+function LimparZPL($t) {
+  if ($null -eq $t) { return '' }
+  $s = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding('ISO-8859-8').GetBytes([string]$t))
+  # O ERP grava campo vazio como "." — imprimir isso deixaria um ponto solto.
+  if ($s.Trim() -eq '.') { return '' }
+  return ($s -replace '[\^~]', ' ').Trim()
+}
+
+# Notas anteriores às colunas novas só têm o endereço concatenado. Como o formato
+# é o nosso ("LOGRADOURO, N - BAIRRO, MUNICIPIO - UF"), dá para desmontar de trás
+# para frente e a etiqueta sair completa também para elas.
+function DesmontarEndereco($completo) {
+  $r = @{ logradouro = ''; bairro = ''; municipio = ''; uf = '' }
+  $t = (LimparZPL $completo).Split('||')[0].Trim()
+  if (-not $t) { return $r }
+  $i = $t.LastIndexOf(' - '); if ($i -gt 0) { $r.uf        = $t.Substring($i+3).Trim(); $t = $t.Substring(0,$i) }
+  $i = $t.LastIndexOf(',');   if ($i -gt 0) { $r.municipio = $t.Substring($i+1).Trim(); $t = $t.Substring(0,$i) }
+  $i = $t.LastIndexOf(' - '); if ($i -gt 0) { $r.bairro    = $t.Substring($i+3).Trim(); $t = $t.Substring(0,$i) }
+  $r.logradouro = $t.Trim()
+  return $r
+}
+
+function MontarZPL($n, $vol, $totalVol) {
+  $cep = LimparZPL $n.customer_zip
+  if ($cep.Length -eq 8) { $cep = $cep.Substring(0,5) + '-' + $cep.Substring(5) }
+
+  $velho  = DesmontarEndereco $n.customer_address
+  $logr   = if ($n.end_logradouro) { LimparZPL $n.end_logradouro } else { $velho.logradouro }
+  $bairro = if ($n.end_bairro)     { LimparZPL $n.end_bairro }     else { $velho.bairro }
+  $cidade = if ($n.end_municipio)  { LimparZPL $n.end_municipio }  else { $velho.municipio }
+  $uf     = if ($n.end_uf)         { LimparZPL $n.end_uf }         else { $velho.uf }
+  $vend   = LimparZPL $n.vendedor
+  $ref    = LimparZPL $n.referencia
+
+  $z = @('^XA', "^PW$ETIQUETA_LARGURA", "^LL$ETIQUETA_ALTURA", '^LH0,0', '^CI0')
+  $y = 18
+  $z += "^FO14,$y^A0N,18,18^FDREMETENTE^FS"; $y += 20
+  $z += "^FO14,$y^FB452,2,0,L^A0N,20,20^FD$(LimparZPL $REMETENTE)^FS"; $y += 30
+  $z += "^FO10,$y^GB460,2,2^FS"; $y += 12
+
+  $z += "^FO14,$y^A0N,18,18^FDDESTINATARIO^FS"; $y += 20
+  $z += "^FO14,$y^FB452,3,0,L^A0N,22,22^FD$(LimparZPL $n.customer_name)^FS"; $y += 78
+  $z += "^FO10,$y^GB460,2,2^FS"; $y += 12
+
+  $z += "^FO14,$y^A0N,18,18^FDENDERECO^FS"; $y += 20
+  $z += "^FO14,$y^FB452,2,0,L^A0N,20,20^FD$logr^FS"; $y += 48
+  if ($bairro) { $z += "^FO14,$y^A0N,20,20^FDBAIRRO: $bairro^FS"; $y += 24 }
+  $z += "^FO14,$y^A0N,20,20^FDCEP: $cep^FS"; $y += 24
+  $z += "^FO14,$y^A0N,20,20^FDDESTINO: $cidade^FS"
+  $z += "^FO360,$y^A0N,20,20^FDUF: $uf^FS"; $y += 28
+  $z += "^FO10,$y^GB460,2,2^FS"; $y += 12
+
+  if ($ref)  { $z += "^FO14,$y^FB452,2,0,L^A0N,18,18^FDREF: $ref^FS"; $y += 42 }
+  if ($vend) { $z += "^FO14,$y^A0N,18,18^FDVENDEDOR: $vend^FS"; $y += 26 }
+
+  $yRod = $ETIQUETA_ALTURA - 132
+  $z += "^FO10,$yRod^GB460,2,2^FS"
+  $z += "^FO14,$($yRod+12)^A0N,20,20^FDNOTA FISCAL^FS"
+  $z += "^FO14,$($yRod+34)^A0N,52,52^FD$(LimparZPL $n.number)^FS"
+  $z += "^FO14,$($yRod+92)^A0N,18,18^FDSERIE: $(LimparZPL $n.series)^FS"
+  $z += "^FO300,$($yRod+12)^A0N,20,20^FDVOLUME^FS"
+  $z += "^FO300,$($yRod+34)^A0N,52,52^FD$vol/$totalVol^FS"
+  $z += '^XZ'
+  return ($z -join "`r`n")
+}
+
+# Imprime uma etiqueta por volume. Devolve $true só se TODAS saíram.
+function ImprimirEtiquetas($n) {
+  $total = if ($n.cargo_volume_count -and [int]$n.cargo_volume_count -gt 0) { [int]$n.cargo_volume_count } else { 1 }
+  try {
+    $cli = New-Object System.Net.Sockets.TcpClient
+    if (-not $cli.BeginConnect($IP_ETIQUETA,$PORTA_ETIQUETA,$null,$null).AsyncWaitHandle.WaitOne(5000)) {
+      throw "impressora de etiqueta nao respondeu em $IP_ETIQUETA"
+    }
+    $st = $cli.GetStream()
+    for ($v = 1; $v -le $total; $v++) {
+      $b = [Text.Encoding]::ASCII.GetBytes((MontarZPL $n $v $total))
+      $st.Write($b,0,$b.Length); $st.Flush()
+      Start-Sleep -Milliseconds 250
+    }
+    $st.Close(); $cli.Close()
+    Registrar "  NF $($n.number): $total etiqueta(s)"
+    return $true
+  } catch {
+    Registrar "  NF $($n.number): etiqueta FALHOU - $($_.Exception.Message)"
+    return $false
+  }
 }
 
 # O link do Drive é de visualização; para baixar o arquivo é outro endereço.
@@ -154,12 +260,14 @@ try {
 
 New-Item -ItemType Directory -Force -Path $TEMP | Out-Null
 if (-not (Test-Path $ARQ_IMPRESSAS)) { New-Item -ItemType File -Path $ARQ_IMPRESSAS | Out-Null }
+if (-not (Test-Path $ARQ_ETIQUETAS)) { New-Item -ItemType File -Path $ARQ_ETIQUETAS | Out-Null }
 
 $jaImpressas = @{}
 Get-Content $ARQ_IMPRESSAS | ForEach-Object { if ($_ -ne "") { $jaImpressas[$_] = $true } }
+$jaEtiquetadas = @{}
+Get-Content $ARQ_ETIQUETAS | ForEach-Object { if ($_ -ne "") { $jaEtiquetadas[$_] = $true } }
 
 # ── Busca as notas candidatas ──
-# status=PENDING: nota ja entregue nao precisa de papel.
 $desde = (Get-Date).ToUniversalTime().AddHours(-$MAX_HORAS).ToString("yyyy-MM-ddTHH:mm:ss")
 # NAO filtrar por status. Uma nota pode ser atribuida, entrar em rota ou ate ser
 # entregue poucos minutos depois de chegar — e se isso acontecer antes do agente
@@ -167,7 +275,7 @@ $desde = (Get-Date).ToUniversalTime().AddHours(-$MAX_HORAS).ToString("yyyy-MM-dd
 # NF 6864 e 6865 (entregues 6 e 25 min apos entrarem, nunca impressas).
 # Quem evita imprimir nota velha e a janela de $MAX_HORAS; quem evita repetir e
 # o arquivo impressas.txt. Status nao tem nada a ver com precisar de papel.
-$filtro = "select=id,number,access_key,pdf_url,customer_name,created_at" +
+$filtro = "select=id,number,series,access_key,pdf_url,customer_name,customer_address,customer_zip,created_at,vendedor,referencia,end_logradouro,end_bairro,end_municipio,end_uf,cargo_volume_count" +
           "&created_at=gte.$desde" +
           "&pdf_url=not.is.null" +
           "&deleted_at=is.null" +
@@ -185,12 +293,32 @@ try {
   exit 1
 }
 
-$novas = @($notas | Where-Object { -not $jaImpressas.ContainsKey($_.id) })
+# Falta o DANFE OU falta a etiqueta: as duas coisas são contadas separadamente.
+$novas = @($notas | Where-Object {
+  (-not $jaImpressas.ContainsKey($_.id)) -or
+  ($IMPRIMIR_ETIQUETA -and -not $jaEtiquetadas.ContainsKey($_.id))
+})
 if ($novas.Count -eq 0) { BaterPonto; exit 0 }   # nada novo: sai quieto, mas vivo
 
 Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
 
 foreach ($nota in $novas) {
+
+  # ── Etiqueta primeiro: é texto puro pela rede, rápido e sem download. Se ela
+  # falhar, o DANFE ainda sai; e como cada um tem sua própria memória, o que
+  # falhou repete sozinho no ciclo seguinte sem duplicar o outro.
+  if ($IMPRIMIR_ETIQUETA -and -not $jaEtiquetadas.ContainsKey($nota.id)) {
+    if ($Simular) {
+      $tv = if ($nota.cargo_volume_count -and [int]$nota.cargo_volume_count -gt 0) { [int]$nota.cargo_volume_count } else { 1 }
+      Registrar "  [SIMULACAO] NF $($nota.number): $tv etiqueta(s)"
+    } elseif (ImprimirEtiquetas $nota) {
+      Add-Content -Path $ARQ_ETIQUETAS -Value $nota.id -Encoding utf8
+    }
+  }
+
+  # ── DANFE ──
+  if ($jaImpressas.ContainsKey($nota.id)) { continue }   # já saiu; só faltava a etiqueta
+
   $destino = Join-Path $TEMP "DANFE-$($nota.access_key).pdf"
   try {
     BaixarComPrazo (LinkDeDownload $nota.pdf_url) $destino 45
