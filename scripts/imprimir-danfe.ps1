@@ -161,10 +161,15 @@ Get-Content $ARQ_IMPRESSAS | ForEach-Object { if ($_ -ne "") { $jaImpressas[$_] 
 # ── Busca as notas candidatas ──
 # status=PENDING: nota ja entregue nao precisa de papel.
 $desde = (Get-Date).ToUniversalTime().AddHours(-$MAX_HORAS).ToString("yyyy-MM-ddTHH:mm:ss")
+# NAO filtrar por status. Uma nota pode ser atribuida, entrar em rota ou ate ser
+# entregue poucos minutos depois de chegar — e se isso acontecer antes do agente
+# passar, filtrar por PENDING a esconderia para sempre. Aconteceu em 13/08 com as
+# NF 6864 e 6865 (entregues 6 e 25 min apos entrarem, nunca impressas).
+# Quem evita imprimir nota velha e a janela de $MAX_HORAS; quem evita repetir e
+# o arquivo impressas.txt. Status nao tem nada a ver com precisar de papel.
 $filtro = "select=id,number,access_key,pdf_url,customer_name,created_at" +
           "&created_at=gte.$desde" +
           "&pdf_url=not.is.null" +
-          "&status=eq.PENDING" +
           "&deleted_at=is.null" +
           "&order=created_at.asc" +
           "&limit=$MAX_POR_CICLO"

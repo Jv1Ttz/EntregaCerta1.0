@@ -61,6 +61,13 @@ $expediente = ($DIAS_UTEIS -contains $agora.DayOfWeek.ToString()) -and
               ($agora.Hour -ge $HORA_INICIO) -and ($agora.Hour -lt $HORA_FIM)
 if (-not $expediente) { exit 0 }
 
+# Logo depois de ligar o PC, o ponto e da noite anterior por definicao — nao e
+# travamento. Sem esta folga o vigia dispara todo dia as 7h, e alarme falso
+# diario ensina a ignorar o alarme, que e justamente o que nao pode acontecer.
+# (Aconteceu em 13/08: "parado ha 813 min" logo apos o boot.)
+$ligadoHaMin = [int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalMinutes
+if ($ligadoHaMin -lt 15) { exit 0 }
+
 if (-not (Test-Path $ARQ_PONTO)) {
   # Sem ponto nenhum: ou nunca rodou, ou é uma instalação nova. Não alarma.
   exit 0
