@@ -24,9 +24,18 @@ $LIMITE_MIN        = 10
 # propósito e não há nota chegando (as notas entram entre ~8h e ~19h).
 $HORA_INICIO       = 7
 $HORA_FIM          = 19
-$DIAS_UTEIS        = @('Monday','Tuesday','Wednesday','Thursday','Friday','Saturday')
+# Sabado saiu da lista: em 90 dias de historico, ZERO notas entraram no sabado
+# ou no domingo (1.882 notas, todas de segunda a sexta). Monitorar um dia sem
+# movimento so gera alarme falso.
+$DIAS_UTEIS        = @('Monday','Tuesday','Wednesday','Thursday','Friday')
 # Depois de tanto tempo parado, sobe de aviso discreto para janela na tela.
 $MIN_PARA_INSISTIR = 30
+# A janela persistente TEM que ter prazo. Com prazo 0 ela espera clique para
+# sempre, o script nunca termina, e o Agendador nao inicia a proxima execucao
+# enquanto a anterior estiver rodando -- ou seja, o vigia se desliga sozinho.
+# Aconteceu de verdade: ficou preso de 15/08 07:04 ate 17/08 08:04, dois dias
+# inteiros cego. O alarme de incendio travado pelo proprio alarme.
+$SEG_JANELA_ABERTA = 300
 
 function Anotar($txt) {
   $l = "{0}  {1}" -f (Get-Date -Format 'dd/MM HH:mm:ss'), $txt
@@ -50,9 +59,39 @@ function Avisar($titulo, $texto) {
 }
 
 function Insistir($texto) {
-  # Janela que fica na tela até alguém fechar — para o caso de o aviso discreto
-  # ter passado batido. Só aparece quando já faz muito tempo.
-  try { (New-Object -ComObject Wscript.Shell).Popup($texto, 0, 'EntregaCerta - impressao parada', 48) | Out-Null } catch { }
+  # Janela mais chamativa, para o caso de o aviso discreto ter passado batido.
+  # O prazo em segundos é essencial: ela se fecha sozinha e o script segue.
+  try { (New-Object -ComObject Wscript.Shell).Popup($texto, $SEG_JANELA_ABERTA, 'EntregaCerta - impressao parada', 48) | Out-Null } catch { }
+}
+
+# Desde quando esta maquina esta de pe e acordada.
+#
+# Nao basta olhar o boot: dormir NAO altera a hora do boot, entao depois de uma
+# soneca o vigia via "PC ligado ha 3 dias" e concluia que o agente tinha morrido,
+# quando na verdade a maquina inteira estava dormindo junto. Foi o que gerou o
+# "parado ha 871 min" de 15/08 -- o PC dormiu sexta 16:33 e acordou sabado 07:00.
+function AcordadaDesde() {
+  $boot  = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+  $maior = $boot
+
+  # Duas fontes, porque nenhuma sozinha cobre todos os casos -- medido nesta
+  # maquina: o Kernel-Power 107 registrou 14/08 16:33 e 12/08 17:30, enquanto os
+  # despertares de 07:00 (alarme da BIOS) sairam SO no Power-Troubleshooter.
+  # Olhar so o 107, como fiz na primeira versao, erraria justamente o caso do
+  # 13/08 e do 15/08. Fica com a retomada mais recente das duas.
+  $fontes = @(
+    @{ ProviderName='Microsoft-Windows-Kernel-Power';          Id=107 },
+    @{ ProviderName='Microsoft-Windows-Power-Troubleshooter';  Id=1   }
+  )
+  foreach ($f in $fontes) {
+    try {
+      $ev = Get-WinEvent -FilterHashtable @{
+        LogName='System'; ProviderName=$f.ProviderName; Id=$f.Id; StartTime=$boot
+      } -MaxEvents 1 -ErrorAction Stop | Select-Object -ExpandProperty TimeCreated
+      if ($ev -and $ev -gt $maior) { $maior = $ev }
+    } catch { }   # sem evento dessa fonte: segue para a proxima
+  }
+  return $maior
 }
 
 # ─────────────────────────── verificação ───────────────────────────
@@ -65,8 +104,8 @@ if (-not $expediente) { exit 0 }
 # travamento. Sem esta folga o vigia dispara todo dia as 7h, e alarme falso
 # diario ensina a ignorar o alarme, que e justamente o que nao pode acontecer.
 # (Aconteceu em 13/08: "parado ha 813 min" logo apos o boot.)
-$ligadoHaMin = [int]((Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime).TotalMinutes
-if ($ligadoHaMin -lt 15) { exit 0 }
+$acordadaHaMin = [int]((Get-Date) - (AcordadaDesde)).TotalMinutes
+if ($acordadaHaMin -lt 15) { exit 0 }
 
 if (-not (Test-Path $ARQ_PONTO)) {
   # Sem ponto nenhum: ou nunca rodou, ou é uma instalação nova. Não alarma.
@@ -94,9 +133,12 @@ $msg = "O agente de impressao nao completa um ciclo ha $paradoMin minutos. " +
 
 if ($paradoMin -ge $MIN_PARA_INSISTIR -and $jaAvisou -ne 'insistiu') {
   Anotar "ALERTA GRAVE - parado ha $paradoMin min"
-  Avisar 'EntregaCerta - impressao parada' $msg
-  Insistir "$msg`n`nO que fazer:`n1. Abra C:\EntregaCerta e rode '2-IMPRIMIR agora.bat'`n2. Se nao resolver, reinicie o PC`n`nNenhuma nota se perde: elas voltam a sair quando o agente normalizar."
+  # Marca ANTES de exibir: avisar na tela envolve janela e espera, e se algo
+  # segurar o script ali, o estado ja esta gravado e a proxima execucao nao
+  # repete o alerta do zero.
   Set-Content $ARQ_ESTADO -Value 'insistiu' -Encoding utf8
+  Avisar 'EntregaCerta - impressao parada' $msg
+  Insistir "$msg`n`nO que fazer:`n1. Abra C:\EntregaCerta e rode '2-IMPRIMIR agora.bat'`n2. Se nao resolver, reinicie o PC`n`nNenhuma nota se perde: elas voltam a sair quando o agente normalizar.`n`n(Esta janela fecha sozinha em 5 minutos.)"
 }
 elseif (-not $jaAvisou) {
   Anotar "ALERTA - parado ha $paradoMin min"
