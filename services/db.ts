@@ -205,16 +205,32 @@ export const db = {
   getInvoices: async (): Promise<Invoice[]> => {
     // Busca TODAS as notas (sem limite de data) em múltiplos lotes,
     // para contornar o limite de ~1000 linhas por requisição do PostgREST.
+    //
+    // SEM a coluna `items`: ela é metade do peso de cada nota (~806 de ~1619
+    // bytes) e nenhuma tela que consome esta função exibe produto algum —
+    // medido nos logs, este endpoint sozinho respondia por ~97% de toda a
+    // saída de dados do projeto (~870 MB/dia), o que estourou a cota do plano.
+    // Quem precisa dos itens (tela do motorista, p/ devolução parcial) usa
+    // getInvoicesByDriver, que continua trazendo tudo.
     const pageSize = 500; // cada chamada traz até 500 registros
     let all: Invoice[] = [];
     let from = 0;
+
+    const COLUNAS_SEM_ITEMS =
+      'id,access_key,number,series,customer_name,customer_doc,customer_address,' +
+      'customer_zip,value,status,driver_id,vehicle_id,created_at,return_value,' +
+      'delivered_at,delivery_attempts,last_failure_reason,original_value,lat,lng,' +
+      'return_final_status,return_finalized_at,return_final_note,pdf_url,' +
+      'cargo_volume_count,cargo_volume_type,cargo_weight_net,cargo_weight_gross,' +
+      'deleted_at,deleted_by,deleted_reason,route_id,vendedor,referencia,obs_nf,' +
+      'end_logradouro,end_bairro,end_municipio,end_uf';
 
     while (true) {
       const to = from + pageSize - 1;
 
       const { data, error } = await supabase
         .from('invoices')
-        .select('*')
+        .select(COLUNAS_SEM_ITEMS)
         .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .order('id', { ascending: false }) // desempate único: estabiliza a paginação e evita notas duplicadas entre lotes
@@ -225,7 +241,9 @@ export const db = {
         break;
       }
 
-      const batch = (data as Invoice[]) || [];
+      // `as unknown` porque o supabase-js não infere o tipo de uma lista de
+      // colunas deste tamanho (vira GenericStringError); o shape é Invoice sem items.
+      const batch = (data as unknown as Invoice[]) || [];
       all = all.concat(batch);
 
       // Se veio menos que o tamanho da página, não há mais registros
