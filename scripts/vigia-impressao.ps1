@@ -37,6 +37,18 @@ $MIN_PARA_INSISTIR = 30
 # inteiros cego. O alarme de incendio travado pelo proprio alarme.
 $SEG_JANELA_ABERTA = 300
 
+# ── Vigilância da impressora de etiqueta ──
+# O ponto batido pelo agente NÃO cobre a etiqueta: o ciclo termina bem, o DANFE
+# sai, e a térmica pode estar fora do ar sem que nada apareça. Ou seja, a falha
+# mais provável da etiqueta é justamente invisível para a checagem de cima.
+$ARQ_AGENTE     = Join-Path $PASTA "imprimir-danfe.ps1"
+$ARQ_LOG_IMPR   = Join-Path $PASTA "impressao.log"
+$ESTADO_ETIQ    = Join-Path $PASTA ".vigia-etiqueta"
+$IP_ETIQUETA    = '10.9.74.176'
+$PORTA_ETIQUETA = 9100
+# Tolerância curta: a impressora responde em milissegundos quando está de pé.
+$PRAZO_ETIQ_MS  = 4000
+
 function Anotar($txt) {
   $l = "{0}  {1}" -f (Get-Date -Format 'dd/MM HH:mm:ss'), $txt
   Add-Content -Path $ARQ_ALERTAS -Value $l -Encoding utf8
@@ -119,6 +131,58 @@ $paradoMin = [int]($agora - $ponto).TotalMinutes
 
 # Estado anterior, para não repetir o mesmo alerta a cada 5 minutos.
 $jaAvisou = if (Test-Path $ARQ_ESTADO) { (Get-Content $ARQ_ESTADO -Raw).Trim() } else { '' }
+
+# ─────────────────── impressora de etiqueta ───────────────────
+# Feito ANTES de sair pelo caminho feliz do agente: o ciclo pode estar perfeito e
+# a térmica caída, que é exatamente a falha que ninguém vê.
+function VigiarEtiqueta {
+  # Só vigia se a etiqueta estiver ligada no agente. Enquanto estiver desligada,
+  # a térmica fora do ar não é problema nenhum.
+  if (-not (Test-Path $ARQ_AGENTE)) { return }
+  $ligada = (Select-String -Path $ARQ_AGENTE -Pattern '^\$IMPRIMIR_ETIQUETA\s*=\s*\$true' -Quiet)
+  if (-not $ligada) { return }
+
+  $viva = $false
+  try {
+    $cli = New-Object System.Net.Sockets.TcpClient
+    $viva = $cli.BeginConnect($IP_ETIQUETA, $PORTA_ETIQUETA, $null, $null).AsyncWaitHandle.WaitOne($PRAZO_ETIQ_MS)
+    $cli.Close()
+  } catch { $viva = $false }
+
+  # Falhas registradas pelo agente nos últimos minutos. A sondagem acima pega a
+  # impressora desligada; isto pega a que aceita conexão mas recusa o trabalho.
+  $falhasRecentes = 0
+  if (Test-Path $ARQ_LOG_IMPR) {
+    $corte = (Get-Date).AddMinutes(-15)
+    Get-Content $ARQ_LOG_IMPR -Tail 60 | Where-Object { $_ -match 'etiqueta FALHOU' } | ForEach-Object {
+      if ($_ -match '^(\d{2}/\d{2})\s+(\d{2}:\d{2}:\d{2})') {
+        $q = try { [datetime]::ParseExact("$($Matches[1])/$((Get-Date).Year) $($Matches[2])",'dd/MM/yyyy HH:mm:ss',$null) } catch { $null }
+        if ($q -and $q -ge $corte) { $falhasRecentes++ }
+      }
+    }
+  }
+
+  $jaAvisouEtiq = if (Test-Path $ESTADO_ETIQ) { (Get-Content $ESTADO_ETIQ -Raw).Trim() } else { '' }
+
+  if ($viva -and $falhasRecentes -eq 0) {
+    if ($jaAvisouEtiq) {
+      Anotar "OK - impressora de etiqueta voltou"
+      Remove-Item $ESTADO_ETIQ -Force -ErrorAction SilentlyContinue
+    }
+    return
+  }
+
+  if ($jaAvisouEtiq) { return }   # já avisou; não repete a cada 5 min
+
+  $motivo = if (-not $viva) { "nao responde em $IP_ETIQUETA" } else { "recusou $falhasRecentes impressao(oes) nos ultimos 15 min" }
+  Anotar "ALERTA - impressora de etiqueta: $motivo"
+  Set-Content $ESTADO_ETIQ -Value 'avisou' -Encoding utf8
+  Avisar 'EntregaCerta - etiqueta parada' `
+    ("A impressora de etiqueta $motivo. As notas continuam saindo na Epson, " +
+     "mas as MERCADORIAS estao ficando sem etiqueta. Nenhuma se perde: elas saem " +
+     "quando a impressora voltar.")
+}
+VigiarEtiqueta
 
 if ($paradoMin -lt $LIMITE_MIN) {
   if ($jaAvisou) {
