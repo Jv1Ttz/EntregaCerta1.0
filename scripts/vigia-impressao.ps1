@@ -142,10 +142,17 @@ function VigiarEtiqueta {
   $ligada = (Select-String -Path $ARQ_AGENTE -Pattern '^\$IMPRIMIR_ETIQUETA\s*=\s*\$true' -Quiet)
   if (-not $ligada) { return }
 
+  # WaitOne devolve $true quando a tentativa TERMINA — inclusive terminando em
+  # recusa. Só devolve $false no estouro de prazo. Sem o EndConnect/Connected
+  # abaixo, uma conexão recusada na hora era lida como "impressora viva", e o
+  # vigia anunciava que ela tinha voltado no ciclo seguinte à queda.
   $viva = $false
   try {
     $cli = New-Object System.Net.Sockets.TcpClient
-    $viva = $cli.BeginConnect($IP_ETIQUETA, $PORTA_ETIQUETA, $null, $null).AsyncWaitHandle.WaitOne($PRAZO_ETIQ_MS)
+    $ar  = $cli.BeginConnect($IP_ETIQUETA, $PORTA_ETIQUETA, $null, $null)
+    if ($ar.AsyncWaitHandle.WaitOne($PRAZO_ETIQ_MS)) {
+      try { $cli.EndConnect($ar); $viva = $cli.Connected } catch { $viva = $false }
+    }
     $cli.Close()
   } catch { $viva = $false }
 
@@ -168,19 +175,62 @@ function VigiarEtiqueta {
     if ($jaAvisouEtiq) {
       Anotar "OK - impressora de etiqueta voltou"
       Remove-Item $ESTADO_ETIQ -Force -ErrorAction SilentlyContinue
+      Avisar 'EntregaCerta - etiquetas voltaram' `
+        "A impressora de etiqueta voltou a funcionar. As etiquetas que faltaram estao saindo sozinhas."
     }
     return
   }
 
-  if ($jaAvisouEtiq) { return }   # já avisou; não repete a cada 5 min
+  # Desde quando está com problema. Guardado no arquivo de estado para que o
+  # aviso possa subir de tom se demorar, sem depender de o vigia ficar rodando.
+  $desde = $null
+  if ($jaAvisouEtiq -match '^\d{4}-\d{2}-\d{2}') {
+    $desde = try { [datetime]::Parse($jaAvisouEtiq) } catch { $null }
+  }
+  $primeiraVez = ($null -eq $desde)
+  if ($primeiraVez) { $desde = Get-Date }
+  $paradaMin = [int]((Get-Date) - $desde).TotalMinutes
 
-  $motivo = if (-not $viva) { "nao responde em $IP_ETIQUETA" } else { "recusou $falhasRecentes impressao(oes) nos ultimos 15 min" }
-  Anotar "ALERTA - impressora de etiqueta: $motivo"
-  Set-Content $ESTADO_ETIQ -Value 'avisou' -Encoding utf8
-  Avisar 'EntregaCerta - etiqueta parada' `
-    ("A impressora de etiqueta $motivo. As notas continuam saindo na Epson, " +
-     "mas as MERCADORIAS estao ficando sem etiqueta. Nenhuma se perde: elas saem " +
-     "quando a impressora voltar.")
+  # Linguagem de quem trabalha no galpão, não de quem escreveu o script: dizer
+  # "nao responde em 10.9.74.176" fez o aviso ser visto e não compreendido.
+  # O texto precisa responder três coisas: o que parou, o que fazer, e se perde
+  # trabalho.
+  $oQueHouve = if (-not $viva) {
+    "A impressora de etiqueta (a termica do galpao) parou de responder."
+  } else {
+    "A impressora de etiqueta recusou $falhasRecentes impressao(oes) nos ultimos 15 minutos."
+  }
+  $texto = @"
+$oQueHouve
+
+O QUE ESTA ACONTECENDO
+As notas continuam saindo normalmente na impressora de nota.
+Mas as caixas estao sendo despachadas SEM ETIQUETA.
+
+O QUE FAZER
+1. Veja se ela esta ligada
+2. Veja se tem etiqueta na bobina
+3. Veja se o cabo de rede esta conectado
+
+NAO SE PERDE NADA
+Assim que ela voltar, as etiquetas que faltaram saem sozinhas,
+inclusive das notas que ja passaram.
+"@
+
+  if ($primeiraVez) {
+    Anotar "ALERTA - impressora de etiqueta parada ($(if(-not $viva){'sem resposta na rede'}else{"$falhasRecentes falha(s)"}))"
+    Set-Content $ESTADO_ETIQ -Value (Get-Date).ToString('s') -Encoding utf8
+    Avisar 'EntregaCerta - etiquetas nao estao saindo' $texto
+    return
+  }
+
+  # Já avisou antes. Se está parada há muito tempo, o balão discreto claramente
+  # não resolveu — sobe para a janela que fica na tela (com prazo, ver acima).
+  if ($paradaMin -ge $MIN_PARA_INSISTIR -and $jaAvisouEtiq -notmatch 'insistiu') {
+    Anotar "ALERTA GRAVE - impressora de etiqueta parada ha $paradaMin min"
+    Set-Content $ESTADO_ETIQ -Value "$($desde.ToString('s')) insistiu" -Encoding utf8
+    Insistir "$texto`n(Parada ha $paradaMin minutos. Esta janela fecha sozinha em 5 minutos.)"
+  }
 }
 VigiarEtiqueta
 

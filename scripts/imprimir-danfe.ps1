@@ -365,10 +365,17 @@ function ImprimirEtiquetas($n, $jaFeitas, $restanteNoCiclo) {
   $ate = [Math]::Min($total, $jaFeitas + $restanteNoCiclo)
   $feitas = 0
   try {
+    # WaitOne devolve $true quando a tentativa TERMINA, mesmo terminando em
+    # recusa — só devolve $false no estouro de prazo. Sem conferir Connected,
+    # uma conexão recusada seguia adiante e só falhava lá na frente, no Write,
+    # com uma mensagem que não apontava a causa.
     $cli = New-Object System.Net.Sockets.TcpClient
-    if (-not $cli.BeginConnect($IP_ETIQUETA,$PORTA_ETIQUETA,$null,$null).AsyncWaitHandle.WaitOne(5000)) {
+    $ar  = $cli.BeginConnect($IP_ETIQUETA,$PORTA_ETIQUETA,$null,$null)
+    if (-not $ar.AsyncWaitHandle.WaitOne(5000)) {
       throw "impressora de etiqueta nao respondeu em $IP_ETIQUETA"
     }
+    $cli.EndConnect($ar)
+    if (-not $cli.Connected) { throw "impressora de etiqueta recusou a conexao em $IP_ETIQUETA" }
     $st = $cli.GetStream()
     for ($v = $jaFeitas + 1; $v -le $ate; $v++) {
       $b = [Text.Encoding]::ASCII.GetBytes((MontarZPL $n $v $total))
