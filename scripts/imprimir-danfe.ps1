@@ -109,6 +109,9 @@ if (Test-Path $ARQ_SENIOR) {
   }
 }
 $PRAZO_SENIOR_SEG = 20
+# Ver a explicação em ConsultarCargaERP: usar o curl do Windows, não o que estiver
+# primeiro no PATH.
+$CURL = Join-Path $env:SystemRoot 'system32\curl.exe'
 
 # ─────────────────────────── APOIO ───────────────────────────
 
@@ -309,7 +312,12 @@ function ConsultarCargaERP($numeroNF) {
     # curl.exe e nao Invoke-WebRequest: o PowerShell 5.1 falhou o handshake TLS
     # com este servidor em todos os endpoints, inclusive nos que sabidamente
     # funcionam. O curl passa direto.
-    & curl.exe -s -k -o $rspFile --max-time $PRAZO_SENIOR_SEG `
+    #
+    # Caminho ABSOLUTO de proposito. Se o PATH tiver o curl do Git (MSYS) na
+    # frente, ele converte o "@C:\..." do --data-binary e envia corpo VAZIO; o
+    # servidor responde "Corpo da mensagem esta vazio" e o agente leria isso
+    # como ERP fora do ar, em toda nota, sem nenhum sinal do motivo real.
+    & $CURL -s -k -o $rspFile --max-time $PRAZO_SENIOR_SEG `
       -X POST $SENIOR['url'] `
       -H "Content-Type: text/xml; charset=UTF-8" -H "SOAPAction: `"`"" `
       --data-binary "@$reqFile" 2>$null | Out-Null
