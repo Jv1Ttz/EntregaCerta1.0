@@ -1177,10 +1177,35 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     return (data as ActivityLog[]) || [];
   },
 
+  /**
+   * Confere a senha do gestor NO BANCO, não no navegador.
+   *
+   * Antes isto comparava com import.meta.env.VITE_ADMIN_PASSWORD. O Vite embute
+   * variáveis VITE_* no bundle, então a senha ficava em texto puro no .js que
+   * qualquer visitante baixa — conferido no dist publicado. Agora o navegador
+   * envia o que foi digitado e recebe só true/false; a senha vive apenas como
+   * hash bcrypt na tabela app_credenciais, que não é legível pela API.
+   *
+   * A variável antiga continua servindo de RESERVA, para o caso de a função não
+   * responder (rede caída, migração revertida). Sem isso, uma falha de rede
+   * trancaria o gestor fora do painel — e a senha antiga já era pública de
+   * qualquer forma, então a reserva não abre nada que já não estivesse aberto.
+   * Quando a nova via estiver rodando por alguns dias, dá para remover a
+   * variável da Vercel e a reserva morre sozinha.
+   */
   verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
-    const configured = import.meta.env.VITE_ADMIN_PASSWORD;
-    if (!configured) return false;
-    return passwordInput === configured;
+    if (!passwordInput) return false;
+    try {
+      const { data, error } = await supabase.rpc('verificar_senha_gestor', {
+        senha_digitada: passwordInput,
+      });
+      if (!error && typeof data === 'boolean') return data;
+      console.error('Verificação de senha no servidor falhou, usando reserva:', error);
+    } catch (e) {
+      console.error('Verificação de senha no servidor indisponível, usando reserva:', e);
+    }
+    const reserva = import.meta.env.VITE_ADMIN_PASSWORD;
+    return Boolean(reserva) && passwordInput === reserva;
   },
 
   updateAdminPassword: async (newPassword: string) => {
