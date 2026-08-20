@@ -10,8 +10,41 @@ import { RoteirizacaoView } from './components/RoteirizacaoView';
 import { ZonasView } from './components/ZonasView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 
+/**
+ * Sessão do gestor.
+ *
+ * Antes, o painel voltava para a tela de escolha de perfil a cada F5 — o estado
+ * de login só existia na memória do React. Reclamação recorrente dos usuários.
+ *
+ * Guarda apenas o INSTANTE EM QUE A SESSÃO EXPIRA, nunca a senha. Prazo em vez
+ * de "para sempre" porque o painel roda em máquina compartilhada no escritório:
+ * navegador esquecido aberto na sexta não deve continuar logado na segunda.
+ */
+const SESSAO_GESTOR = 'ec-sessao-gestor';
+const HORAS_DE_SESSAO = 12;
+
+function sessaoGestorValida(): boolean {
+  try {
+    const ate = Number(localStorage.getItem(SESSAO_GESTOR));
+    if (Number.isFinite(ate) && Date.now() < ate) return true;
+    localStorage.removeItem(SESSAO_GESTOR);   // expirada: limpa o rastro
+  } catch { /* navegador sem localStorage: cai no login, que é o comportamento antigo */ }
+  return false;
+}
+
+function abrirSessaoGestor() {
+  try { localStorage.setItem(SESSAO_GESTOR, String(Date.now() + HORAS_DE_SESSAO * 3600 * 1000)); } catch { }
+}
+
+function fecharSessaoGestor() {
+  try { localStorage.removeItem(SESSAO_GESTOR); } catch { }
+}
+
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewState>({ type: 'ROLE_SELECT' });
+  // Retoma direto no painel se a sessão ainda vale, em vez de sempre começar do zero.
+  const [view, setView] = useState<ViewState>(() =>
+    sessaoGestorValida() ? { type: 'ADMIN_DASHBOARD' } : { type: 'ROLE_SELECT' }
+  );
   
   // Theme State
   const [theme, setTheme] = useState(() => {
@@ -76,6 +109,7 @@ const App: React.FC = () => {
   const confirmAdminLogin = async () => {
     const isValid = await db.verifyAdminPassword(adminPassword);
     if (isValid) {
+      abrirSessaoGestor();
       setView({ type: 'ADMIN_DASHBOARD' });
       setAdminPassword('');
       setAdminLoginError('');
@@ -282,7 +316,7 @@ const App: React.FC = () => {
                 onNavigate={(v) => setView({ type: v as any })}
               />
               <button
-                onClick={() => setView({ type: 'ROLE_SELECT' })}
+                onClick={() => { fecharSessaoGestor(); setView({ type: 'ROLE_SELECT' }); }}
                 className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
               >
                 Sair do Admin
