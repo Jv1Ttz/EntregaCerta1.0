@@ -164,7 +164,26 @@ export interface InvoiceItem {
   value: number;
 }
 
-export type ActivityLogEventType = 'ASSIGNMENT' | 'STATUS_CHANGE' | 'XML_IMPORT' | 'SOFT_DELETE';
+/**
+ * Tipos de evento do log.
+ *
+ * STATUS_CHANGE era um balaio: cobria reentrega, devolução, restauração, rota
+ * finalizada e baixa manual ao mesmo tempo, o que tornava o filtro por tipo
+ * quase inútil. Foi quebrado nos tipos abaixo. Ele permanece na lista porque os
+ * registros antigos já gravados usam esse valor — remover esconderia histórico.
+ */
+export type ActivityLogEventType =
+  | 'ENTREGA'         // motorista concluiu a entrega
+  | 'DEVOLUCAO'       // motorista registrou devolução/recusa
+  | 'PENDENCIA'       // motorista reportou pendência (avaria, falta de item)
+  | 'ROTA'            // rota iniciada, finalizada, agendada ou cancelada
+  | 'ASSIGNMENT'      // nota atribuída a motorista/veículo
+  | 'REENTREGA'       // nota liberada para nova tentativa
+  | 'BAIXA_MANUAL'    // gestor baixou a nota sem passar pelo app
+  | 'XML_IMPORT'
+  | 'SOFT_DELETE'
+  | 'RESTAURACAO'
+  | 'STATUS_CHANGE';  // legado: registros anteriores à separação acima
 
 export interface ActivityLog {
   id: string;
@@ -172,6 +191,12 @@ export interface ActivityLog {
   description: string;
   actor: string;
   created_at: string;
+  /** Nota a que o evento se refere, quando há uma. Permite a linha do tempo. */
+  nf_number?: string | null;
+  /** GESTOR (painel) ou MOTORISTA (aplicativo). */
+  ator_tipo?: 'GESTOR' | 'MOTORISTA' | null;
+  /** Campos extras que variam por evento: motorista, valor, motivo, etc. */
+  detalhe?: Record<string, any> | null;
 }
 
 export interface Zone {

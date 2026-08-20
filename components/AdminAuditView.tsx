@@ -7,10 +7,31 @@ import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateC
 // ─── Configuração dos tipos de evento ───────────────────────────────────────
 
 const EVENT_CONFIG: Record<ActivityLogEventType, { label: string; color: string }> = {
+  ENTREGA:       { label: 'Entrega',        color: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300' },
+  DEVOLUCAO:     { label: 'Devolução',      color: 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300' },
+  PENDENCIA:     { label: 'Pendência',      color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' },
+  ROTA:          { label: 'Rota',           color: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300' },
   ASSIGNMENT:    { label: 'Atribuição',     color: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300' },
-  STATUS_CHANGE: { label: 'Mudança Status', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' },
+  REENTREGA:     { label: 'Reentrega',      color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300' },
+  BAIXA_MANUAL:  { label: 'Baixa Manual',   color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300' },
   XML_IMPORT:    { label: 'Importação XML', color: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300' },
   SOFT_DELETE:   { label: 'Exclusão',       color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300' },
+  RESTAURACAO:   { label: 'Restauração',    color: 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300' },
+  // Legado: registros gravados antes da separação dos tipos acima. Fica na lista
+  // para que o histórico antigo continue com rótulo e cor, em vez de aparecer cru.
+  STATUS_CHANGE: { label: 'Mudança Status', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300' },
+};
+
+/** Nomes legíveis para as chaves do campo `detalhe`, que varia por evento. */
+const ROTULO_DETALHE: Record<string, string> = {
+  motorista: 'Motorista', cliente: 'Cliente', recebedor: 'Recebedor',
+  documento_recebedor: 'Documento', valor: 'Valor da nota', valor_da_nota: 'Valor da nota',
+  valor_devolvido: 'Valor devolvido', motivo: 'Motivo', motivo_codigo: 'Código do motivo',
+  tipo_retorno: 'Tipo de retorno', itens_devolvidos: 'Itens devolvidos',
+  tentativa: 'Tentativa', coordenada: 'Coordenada', mudancas: 'Mudanças',
+  entregues_hoje: 'Entregues hoje', voltaram_para_fila: 'Voltaram para a fila',
+  notas_em_rota: 'Notas em rota', rota_id: 'ID da rota', agendada_para: 'Agendada para',
+  notas: 'Notas', desfecho: 'Desfecho', observacao: 'Observação', status: 'Status',
 };
 
 const formatDateTime = (iso?: string | null) => {
@@ -562,7 +583,10 @@ const ActivityLogsTab: React.FC = () => {
   const [filterType, setFilterType] = useState<ActivityLogEventType | ''>('');
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
+  const [filterNf, setFilterNf] = useState('');
+  const [filterAtor, setFilterAtor] = useState<'GESTOR' | 'MOTORISTA' | ''>('');
   const [search, setSearch] = useState('');
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -570,25 +594,33 @@ const ActivityLogsTab: React.FC = () => {
       event_type: filterType || undefined,
       start: filterStart || undefined,
       end: filterEnd || undefined,
+      nf: filterNf || undefined,
+      ator_tipo: filterAtor || undefined,
     });
     setLogs(data);
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [filterType, filterStart, filterEnd]);
+  useEffect(() => { load(); }, [filterType, filterStart, filterEnd, filterNf, filterAtor]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return logs;
     const term = search.toLowerCase();
-    return logs.filter(l => l.description.toLowerCase().includes(term) || l.actor.toLowerCase().includes(term));
+    return logs.filter(l =>
+      l.description.toLowerCase().includes(term) ||
+      (l.nf_number ?? '').includes(term) ||
+      JSON.stringify(l.detalhe ?? {}).toLowerCase().includes(term)
+    );
   }, [logs, search]);
 
-  const hasFilter = !!(filterType || filterStart || filterEnd || search);
+  const hasFilter = !!(filterType || filterStart || filterEnd || filterNf || filterAtor || search);
 
   const clearFilters = () => {
     setFilterType('');
     setFilterStart('');
     setFilterEnd('');
+    setFilterNf('');
+    setFilterAtor('');
     setSearch('');
   };
 
@@ -641,11 +673,35 @@ const ActivityLogsTab: React.FC = () => {
           </div>
         </div>
 
-        {hasFilter && (
-          <button onClick={clearFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1">
-            <X size={12} /> Limpar filtros
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Origem: separa o que veio do painel do que veio do celular. */}
+          {(['', 'MOTORISTA', 'GESTOR'] as const).map(v => (
+            <button
+              key={v || 'todos'}
+              onClick={() => setFilterAtor(v)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                filterAtor === v
+                  ? 'bg-slate-800 text-white border-slate-800 dark:bg-slate-200 dark:text-slate-900'
+                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:border-slate-400'
+              }`}
+            >
+              {v === '' ? 'Tudo' : v === 'MOTORISTA' ? 'Motorista' : 'Gestor'}
+            </button>
+          ))}
+
+          {filterNf && (
+            <span className="text-xs px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 flex items-center gap-1.5">
+              Nota {filterNf}
+              <button onClick={() => setFilterNf('')} className="hover:text-blue-600"><X size={11} /></button>
+            </span>
+          )}
+
+          {hasFilter && (
+            <button onClick={clearFilters} className="text-xs text-red-500 hover:underline flex items-center gap-1 ml-auto">
+              <X size={12} /> Limpar filtros
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabela */}
@@ -668,13 +724,21 @@ const ActivityLogsTab: React.FC = () => {
                 <tr>
                   <th className="px-4 py-2 whitespace-nowrap">Data / Hora</th>
                   <th className="px-4 py-2">Tipo</th>
+                  <th className="px-4 py-2">Nota</th>
                   <th className="px-4 py-2">Descrição</th>
-                  <th className="px-4 py-2">Ator</th>
+                  <th className="px-4 py-2">Origem</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(log => (
-                  <tr key={log.id} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60">
+                {filtered.map(log => {
+                  const temDetalhe = log.detalhe && Object.values(log.detalhe).some(v => v !== null && v !== undefined && v !== '');
+                  const aberto = expandido === log.id;
+                  return (
+                  <React.Fragment key={log.id}>
+                  <tr
+                    onClick={() => temDetalhe && setExpandido(aberto ? null : log.id)}
+                    className={`border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${temDetalhe ? 'cursor-pointer' : ''}`}
+                  >
                     <td className="px-4 py-2 whitespace-nowrap text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                       {formatDateTime(log.created_at)}
                     </td>
@@ -683,10 +747,57 @@ const ActivityLogsTab: React.FC = () => {
                         {EVENT_CONFIG[log.event_type]?.label ?? log.event_type}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-slate-700 dark:text-slate-200">{log.description}</td>
-                    <td className="px-4 py-2 text-slate-500 dark:text-slate-400">{log.actor}</td>
+                    {/* Clicar na nota filtra o log inteiro por ela: é a linha do
+                        tempo daquela entrega, que é o que se quer quando um
+                        cliente reclama. */}
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {log.nf_number ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setFilterNf(log.nf_number!); }}
+                          className="font-mono font-semibold text-blue-600 dark:text-blue-400 hover:underline"
+                          title="Ver tudo que aconteceu com esta nota"
+                        >
+                          {log.nf_number}
+                        </button>
+                      ) : <span className="text-slate-300 dark:text-slate-600">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-slate-700 dark:text-slate-200">
+                      {log.description}
+                      {temDetalhe && (
+                        <span className="ml-2 text-[10px] text-slate-400">{aberto ? '▲' : '▼'}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${
+                        log.ator_tipo === 'MOTORISTA'
+                          ? 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'
+                          : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                      }`}>
+                        {log.ator_tipo === 'MOTORISTA' ? 'Motorista' : 'Gestor'}
+                      </span>
+                    </td>
                   </tr>
-                ))}
+                  {aberto && (
+                    <tr className="bg-slate-50 dark:bg-slate-900/50">
+                      <td colSpan={5} className="px-4 py-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs">
+                          {Object.entries(log.detalhe!)
+                            .filter(([, v]) => v !== null && v !== undefined && v !== '')
+                            .map(([k, v]) => (
+                              <div key={k} className="flex gap-2">
+                                <span className="text-slate-400 shrink-0">{ROTULO_DETALHE[k] ?? k}:</span>
+                                <span className="text-slate-700 dark:text-slate-200 break-all">
+                                  {Array.isArray(v) ? v.join(', ') : String(v)}
+                                </span>
+                              </div>
+                            ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

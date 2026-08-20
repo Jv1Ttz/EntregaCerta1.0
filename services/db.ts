@@ -40,7 +40,8 @@ export const db = {
     if (error) throw error;
 
     const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
-    await db.addLog('STATUS_CHANGE', `NF ${inv?.number || invoiceId} liberada para reentrega (${nextAttempt}ª tentativa)`);
+    await db.addLog('REENTREGA', `NF ${inv?.number || invoiceId} liberada para reentrega (${nextAttempt}ª tentativa)`,
+      { nf: inv?.number ?? null, detalhe: { tentativa: nextAttempt } });
   },
   
   // Função auxiliar para editar valor (caso seja devolução parcial e precise ajustar)
@@ -85,7 +86,8 @@ export const db = {
 
       const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
       const outcomeLabel = outcome === 'CONCLUDED' ? 'concluída' : 'cancelada';
-      await db.addLog('STATUS_CHANGE', `Devolução da NF ${inv?.number || invoiceId} ${outcomeLabel}${adminNote ? ` — ${adminNote}` : ''}`);
+      await db.addLog('DEVOLUCAO', `Devolução da NF ${inv?.number || invoiceId} ${outcomeLabel}${adminNote ? ` — ${adminNote}` : ''}`,
+        { nf: inv?.number ?? null, detalhe: { desfecho: outcome, observacao: adminNote ?? null } });
     } catch (err) {
       throw err;
     }
@@ -340,7 +342,8 @@ export const db = {
       throw error;
     }
 
-    await db.addLog('SOFT_DELETE', `NF ${inv?.number || invoiceId} excluída${reason ? ` — Motivo: ${reason}` : ''}`);
+    await db.addLog('SOFT_DELETE', `NF ${inv?.number || invoiceId} excluída${reason ? ` — Motivo: ${reason}` : ''}`,
+      { nf: inv?.number ?? null, detalhe: { motivo: reason ?? null } });
   },
 
   restoreInvoice: async (invoiceId: string) => {
@@ -356,7 +359,7 @@ export const db = {
       throw error;
     }
 
-    await db.addLog('STATUS_CHANGE', `NF ${inv?.number || invoiceId} restaurada`);
+    await db.addLog('RESTAURACAO', `NF ${inv?.number || invoiceId} restaurada`, { nf: inv?.number ?? null });
   },
 
   // Lista de notas excluídas (para tela de auditoria do gestor)
@@ -459,7 +462,8 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         parts.push(`Veículo: ${veh?.plate || vehicleId}`);
       }
       if (parts.length > 0) {
-        await db.addLog('ASSIGNMENT', `NF ${currentInv.number} — ${parts.join(', ')}`);
+        await db.addLog('ASSIGNMENT', `NF ${currentInv.number} — ${parts.join(', ')}`,
+          { nf: currentInv.number, detalhe: { mudancas: parts } });
       }
     }
   },
@@ -596,6 +600,10 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       `${driverName} iniciou a rota com ${count || 0} entrega(s).`,
       'INFO'
     );
+    // Início de rota gerava notificação mas não log — e a notificação some
+    // depois de lida, então o dia começava sem marco nenhum no histórico.
+    await db.addLog('ROTA', `${driverName} iniciou a rota com ${count || 0} entrega(s)`,
+      { ator: 'MOTORISTA', detalhe: { motorista: driverName, notas_em_rota: count || 0, rota_id: routeId } });
   },
 
   /**
@@ -686,8 +694,9 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
         (restantes > 0 ? `, ${restantes} voltaram para a fila.` : '.'),
       'INFO'
     );
-    await db.addLog('STATUS_CHANGE', `${driverName} finalizou a rota${origem}` +
-      (restantes > 0 ? ` — ${restantes} nota(s) voltaram para a fila` : ''));
+    await db.addLog('ROTA', `${driverName} finalizou a rota${origem}` +
+      (restantes > 0 ? ` — ${restantes} nota(s) voltaram para a fila` : ''),
+      { detalhe: { motorista: driverName, entregues_hoje: entreguesHoje || 0, voltaram_para_fila: restantes } });
   },
 
   /**
@@ -711,8 +720,9 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
       const { data: drv } = await supabase.from('drivers').select('name').eq('id', inv.driver_id).single();
       driverName = drv?.name || '';
     }
-    await db.addLog('STATUS_CHANGE',
-      `NF ${inv?.number || invoiceId} não entregue hoje${driverName ? ` (${driverName})` : ''} — Motivo: ${reason}`);
+    await db.addLog('PENDENCIA',
+      `NF ${inv?.number || invoiceId} não entregue hoje${driverName ? ` (${driverName})` : ''} — Motivo: ${reason}`,
+      { nf: inv?.number ?? null, ator: 'MOTORISTA', detalhe: { motorista: driverName || null, motivo: reason } });
   },
 
   /**
@@ -865,7 +875,8 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     const qtd = invoiceIds.length;
     const detalhe = qtd > 0 ? ` com ${qtd} nota(s)` : '';
     await db.addNotification(driverId, 'Rota Agendada', `Sua próxima rota foi agendada para ${dataFmt}${detalhe}.`, 'INFO');
-    await db.addLog('ASSIGNMENT', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}${detalhe}`);
+    await db.addLog('ROTA', `Rota de ${driver?.name || driverId} agendada para ${dataFmt}${detalhe}`,
+      { detalhe: { motorista: driver?.name ?? null, agendada_para: scheduledFor, notas: invoiceIds?.length ?? 0 } });
   },
 
   /**
@@ -892,7 +903,7 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     if (rota?.driver_id) {
       await db.addNotification(rota.driver_id, 'Agendamento Cancelado', 'O agendamento da sua próxima rota foi cancelado.', 'INFO');
     }
-    await db.addLog('ASSIGNMENT', `Agendamento de rota cancelado`);
+    await db.addLog('ROTA', `Agendamento de rota cancelado`);
     return true;
   },
 
@@ -986,6 +997,62 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
            console.log("✅ SUCESSO REAL: O banco confirmou a gravação.");
            console.log("Como ficou no banco:", dadosRetornados[0]);
            console.log("Motivo salvo na nota:", dadosRetornados[0].last_failure_reason);
+
+           // Registra a BAIXA. É o evento mais frequente da operação e era o
+           // único sem rastro: o log contava o que o gestor fazia no painel e
+           // ignorava o que acontecia na rua, por isso a tela parecia vazia.
+           //
+           // Fica DEPOIS da confirmação do banco para o log nunca afirmar uma
+           // entrega que não chegou a ser gravada.
+           const nota = dadosRetornados[0];
+           const motorista = await db.nomeDoMotorista(nota.driver_id);
+           const quem = motorista ? `${motorista} ` : '';
+           const local = proof.geo_lat ? `${proof.geo_lat},${proof.geo_long}` : null;
+
+           if (isFailure) {
+             const ehPendencia = !!proof.return_type && proof.return_type !== 'TOTAL' && proof.return_type !== 'PARTIAL';
+             const tipo = proof.return_type === 'PARTIAL' ? 'parcial' : 'total';
+             await db.addLog(
+               ehPendencia ? 'PENDENCIA' : 'DEVOLUCAO',
+               ehPendencia
+                 ? `${quem}reportou pendência na NF ${nota.number} — ${updates.last_failure_reason || 'sem motivo informado'}`
+                 : `${quem}registrou devolução ${tipo} da NF ${nota.number} — ${updates.last_failure_reason || 'sem motivo informado'}`,
+               {
+                 nf: nota.number,
+                 ator: 'MOTORISTA',
+                 detalhe: {
+                   motorista,
+                   cliente: nota.customer_name,
+                   motivo_codigo: proof.failure_reason_code ?? null,
+                   motivo: proof.failure_reason ?? null,
+                   tipo_retorno: proof.return_type ?? null,
+                   itens_devolvidos: proof.return_items ?? null,
+                   valor_devolvido: updates.return_value ?? 0,
+                   valor_da_nota: nota.value,
+                   recebedor: proof.receiver_name ?? null,
+                   coordenada: local,
+                 },
+               }
+             );
+           } else {
+             await db.addLog(
+               'ENTREGA',
+               `${quem}entregou a NF ${nota.number} para ${proof.receiver_name || 'recebedor não informado'}`,
+               {
+                 nf: nota.number,
+                 ator: 'MOTORISTA',
+                 detalhe: {
+                   motorista,
+                   cliente: nota.customer_name,
+                   recebedor: proof.receiver_name ?? null,
+                   documento_recebedor: proof.receiver_doc ?? null,
+                   valor: nota.value,
+                   tentativa: nota.delivery_attempts ?? null,
+                   coordenada: local,
+                 },
+               }
+             );
+           }
        }
        
     } else {
@@ -1131,7 +1198,8 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     const { data: inv } = await supabase.from('invoices').select('number').eq('id', invoiceId).single();
     const nf = inv?.number || invoiceId;
     const statusLabel = status === 'DELIVERED' ? 'Entregue' : 'Devolvida';
-    await db.addLog('STATUS_CHANGE', `Baixa manual na NF ${nf} como ${statusLabel} — Motivo: ${reason}`);
+    await db.addLog('BAIXA_MANUAL', `Baixa manual na NF ${nf} como ${statusLabel} — Motivo: ${reason}`,
+      { nf: String(nf), detalhe: { status, motivo: reason } });
 
     await db.addNotification(
       'ADMIN',
@@ -1162,14 +1230,52 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   },
 
   // --- ACTIVITY LOG ---
-  addLog: async (event_type: ActivityLogEventType, description: string, actor: string = 'ADMIN') => {
-    const { error } = await supabase.from('activity_logs').insert({ event_type, description, actor });
-    if (error) console.error('Erro ao salvar log:', error);
+  /**
+   * Grava um evento no log.
+   *
+   * Nunca lança: log que falha não pode derrubar a operação que ele descreve —
+   * seria trocar um registro perdido por uma entrega perdida.
+   */
+  addLog: async (
+    event_type: ActivityLogEventType,
+    description: string,
+    extras?: { nf?: string | null; ator?: 'GESTOR' | 'MOTORISTA'; detalhe?: Record<string, any> | null }
+  ) => {
+    try {
+      const { error } = await supabase.from('activity_logs').insert({
+        event_type,
+        description,
+        actor: 'ADMIN',                        // sem login individual; ver ator_tipo
+        nf_number: extras?.nf ?? null,
+        ator_tipo: extras?.ator ?? 'GESTOR',
+        detalhe: extras?.detalhe ?? null,
+      });
+      if (error) console.error('Erro ao salvar log:', error);
+    } catch (e) {
+      console.error('Falha ao salvar log:', e);
+    }
   },
 
-  getLogs: async (filters?: { event_type?: ActivityLogEventType; start?: string; end?: string }): Promise<ActivityLog[]> => {
+  /** Nome do motorista para os textos do log. Nunca quebra o fluxo por isso. */
+  nomeDoMotorista: async (driverId?: string | null): Promise<string | null> => {
+    if (!driverId) return null;
+    try {
+      const { data } = await supabase.from('drivers').select('name').eq('id', driverId).single();
+      return data?.name ?? null;
+    } catch { return null; }
+  },
+
+  getLogs: async (filters?: {
+    event_type?: ActivityLogEventType;
+    start?: string;
+    end?: string;
+    nf?: string;
+    ator_tipo?: 'GESTOR' | 'MOTORISTA';
+  }): Promise<ActivityLog[]> => {
     let query = supabase.from('activity_logs').select('*').order('created_at', { ascending: false }).limit(500);
     if (filters?.event_type) query = query.eq('event_type', filters.event_type);
+    if (filters?.nf) query = query.eq('nf_number', filters.nf);
+    if (filters?.ator_tipo) query = query.eq('ator_tipo', filters.ator_tipo);
     if (filters?.start) query = query.gte('created_at', filters.start);
     if (filters?.end) query = query.lte('created_at', filters.end + 'T23:59:59');
     const { data, error } = await query;
