@@ -306,10 +306,10 @@ const App: React.FC = () => {
         return (
           <div className="relative">
             <AdminAuditView />
-            {/* Agora que a Auditoria exige senha, "Voltar" leva ao Painel e não à
-                tela inicial: sair da sessão é papel do "Sair do Admin". */}
+            {/* Volta para a tela inicial, que é de onde se entra aqui. A sessão
+                continua aberta — encerrá-la é papel do "Sair do Admin". */}
             <button
-              onClick={() => setView({ type: 'ADMIN_DASHBOARD' })}
+              onClick={() => setView({ type: 'ROLE_SELECT' })}
               className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
             >
               Voltar
