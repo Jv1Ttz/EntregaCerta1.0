@@ -260,8 +260,19 @@ function MontarZPL($n, $vol, $totalVol) {
   $z += "^FO$x,$yg^A0N,24,24^FDNOTA FISCAL:^FS"
   $z += "^FO40,$($yg+30)^A0N,58,58^FD$(LimparZPL $n.number)^FS"
   $z += "^FO$x,$($yg+96)^A0N,20,20^FDSERIE: $(LimparZPL $n.series)^FS"
-  $z += "^FO270,$yg^A0N,26,26^FDVOLUMES:^FS"
-  $z += "^FO288,$($yg+30)^A0N,50,50^FD$vol / $totalVol^FS"
+  # Volumes: a largura do texto varia MUITO. Medido em produção, a NF 36239 tinha
+  # 441 volumes — o triplo do maior caso da amostra de 113 notas (143). Em
+  # "439 / 441" o último dígito caiu fora da borda direita e a etiqueta saiu
+  # dizendo "439 / 44", que é um número plausível e errado: o pior tipo de defeito,
+  # porque ninguém desconfia.
+  #
+  # Duas proteções: começa mais à esquerda (218 pontos úteis em vez de 186) e
+  # encolhe a fonte conforme o texto cresce. O divisor 440 vem da medição real —
+  # a 50 de fonte cada caractere ocupa ~23 pontos.
+  $txtVol   = "$vol / $totalVol"
+  $fonteVol = [Math]::Max(20, [Math]::Min(50, [int](440 / [Math]::Max(1, $txtVol.Length))))
+  $z += "^FO250,$yg^A0N,26,26^FDVOLUMES:^FS"
+  $z += "^FO250,$($yg+30)^FB218,1,0,L^A0N,$fonteVol,$fonteVol^FD$txtVol^FS"
 
   $yc = $yg + 128
   $z += "^FO10,$yc^GB460,1,1^FS"
