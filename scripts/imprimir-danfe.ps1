@@ -167,7 +167,14 @@ function LimparZPL($t) {
   $s = [Text.Encoding]::ASCII.GetString([Text.Encoding]::GetEncoding('ISO-8859-8').GetBytes([string]$t))
   # O ERP grava campo vazio como "." — imprimir isso deixaria um ponto solto.
   if ($s.Trim() -eq '.') { return '' }
-  return ($s -replace '[\^~]', ' ').Trim()
+  $s = ($s -replace '[\^~]', ' ').Trim()
+  # Traços soltos nas pontas: tanto o texto das observações da NF-e quanto o
+  # cadastro do ERP usam " - " como separador, e o que sobra depois de recortar
+  # o campo vem com eles pendurados. Saiu impresso assim na NF 36239:
+  # "... HOSPITAL DEP LUIS EDUARDO MAGALHAES - - -". Só apara as pontas; traço
+  # no meio do texto é conteúdo e fica.
+  $s = $s -replace '^[\s\-]+', '' -replace '[\s\-]+$', ''
+  return $s
 }
 
 # Notas anteriores às colunas novas só têm o endereço concatenado. Como o formato
