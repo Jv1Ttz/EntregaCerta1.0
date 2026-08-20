@@ -1193,17 +1193,22 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
    * Quando a nova via estiver rodando por alguns dias, dá para remover a
    * variável da Vercel e a reserva morre sozinha.
    */
-  verifyAdminPassword: async (passwordInput: string): Promise<boolean> => {
+  verifyAdminPassword: async (passwordInput: string, perfil: 'gestor' | 'admin' = 'gestor'): Promise<boolean> => {
     if (!passwordInput) return false;
     try {
-      const { data, error } = await supabase.rpc('verificar_senha_gestor', {
+      const { data, error } = await supabase.rpc('verificar_senha', {
+        perfil,
         senha_digitada: passwordInput,
       });
       if (!error && typeof data === 'boolean') return data;
-      console.error('Verificação de senha no servidor falhou, usando reserva:', error);
+      console.error('Verificação de senha no servidor falhou:', error);
     } catch (e) {
-      console.error('Verificação de senha no servidor indisponível, usando reserva:', e);
+      console.error('Verificação de senha no servidor indisponível:', e);
     }
+    // Reserva só para o gestor, e só quando a função NÃO respondeu (rede caída).
+    // Não vale para o admin: aquela senha nunca esteve no bundle e não deve
+    // passar a estar. Senha errada não chega aqui — a função já respondeu false.
+    if (perfil !== 'gestor') return false;
     const reserva = import.meta.env.VITE_ADMIN_PASSWORD;
     return Boolean(reserva) && passwordInput === reserva;
   },

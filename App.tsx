@@ -20,30 +20,41 @@ import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle
  * de "para sempre" porque o painel roda em máquina compartilhada no escritório:
  * navegador esquecido aberto na sexta não deve continuar logado na segunda.
  */
-const SESSAO_GESTOR = 'ec-sessao-gestor';
+type Perfil = 'gestor' | 'admin';
+
+/**
+ * Uma sessão POR PERFIL. Painel do Gestor e tela de Administrador têm senhas
+ * diferentes, então precisam de sessões diferentes: com uma sessão só, quem
+ * entrasse como gestor abriria o Administrador sem a segunda senha, e a
+ * separação viraria enfeite.
+ */
+const CHAVE_SESSAO: Record<Perfil, string> = {
+  gestor: 'ec-sessao-gestor',
+  admin: 'ec-sessao-admin',
+};
 const HORAS_DE_SESSAO = 12;
 
-function sessaoGestorValida(): boolean {
+function sessaoValida(perfil: Perfil): boolean {
   try {
-    const ate = Number(localStorage.getItem(SESSAO_GESTOR));
+    const ate = Number(localStorage.getItem(CHAVE_SESSAO[perfil]));
     if (Number.isFinite(ate) && Date.now() < ate) return true;
-    localStorage.removeItem(SESSAO_GESTOR);   // expirada: limpa o rastro
+    localStorage.removeItem(CHAVE_SESSAO[perfil]);   // expirada: limpa o rastro
   } catch { /* navegador sem localStorage: cai no login, que é o comportamento antigo */ }
   return false;
 }
 
-function abrirSessaoGestor() {
-  try { localStorage.setItem(SESSAO_GESTOR, String(Date.now() + HORAS_DE_SESSAO * 3600 * 1000)); } catch { }
+function abrirSessao(perfil: Perfil) {
+  try { localStorage.setItem(CHAVE_SESSAO[perfil], String(Date.now() + HORAS_DE_SESSAO * 3600 * 1000)); } catch { }
 }
 
-function fecharSessaoGestor() {
-  try { localStorage.removeItem(SESSAO_GESTOR); } catch { }
+function fecharSessao(perfil: Perfil) {
+  try { localStorage.removeItem(CHAVE_SESSAO[perfil]); } catch { }
 }
 
 const App: React.FC = () => {
   // Retoma direto no painel se a sessão ainda vale, em vez de sempre começar do zero.
   const [view, setView] = useState<ViewState>(() =>
-    sessaoGestorValida() ? { type: 'ADMIN_DASHBOARD' } : { type: 'ROLE_SELECT' }
+    sessaoValida('gestor') ? { type: 'ADMIN_DASHBOARD' } : { type: 'ROLE_SELECT' }
   );
   
   // Theme State
@@ -107,11 +118,12 @@ const App: React.FC = () => {
   };
 
   const confirmAdminLogin = async () => {
-    const isValid = await db.verifyAdminPassword(adminPassword);
+    // O destino define QUAL senha vale: a tela de Administrador tem a sua.
+    const destino = view.type === 'ADMIN_LOGIN' && view.destino ? view.destino : 'ADMIN_DASHBOARD';
+    const perfil: Perfil = destino === 'ADMIN_AUDIT' ? 'admin' : 'gestor';
+    const isValid = await db.verifyAdminPassword(adminPassword, perfil);
     if (isValid) {
-      abrirSessaoGestor();
-      // Volta para onde a pessoa queria ir, não sempre para o Painel.
-      const destino = view.type === 'ADMIN_LOGIN' && view.destino ? view.destino : 'ADMIN_DASHBOARD';
+      abrirSessao(perfil);
       setView({ type: destino });
       setAdminPassword('');
       setAdminLoginError('');
@@ -207,7 +219,7 @@ const App: React.FC = () => {
                  <button
                     type="button"
                     onClick={() => setView(
-                      sessaoGestorValida()
+                      sessaoValida('admin')
                         ? { type: 'ADMIN_AUDIT' }
                         : { type: 'ADMIN_LOGIN', destino: 'ADMIN_AUDIT' }
                     )}
@@ -306,13 +318,15 @@ const App: React.FC = () => {
         return (
           <div className="relative">
             <AdminAuditView />
-            {/* Volta para a tela inicial, que é de onde se entra aqui. A sessão
-                continua aberta — encerrá-la é papel do "Sair do Admin". */}
+            {/* Encerra a sessão, não só navega. O Painel do Gestor tem o "Sair do
+                Admin" para isso; aqui só existe este botão, então sem encerrar
+                não haveria como sair a não ser esperando as 12h — e esta é a
+                área mais sensível das duas. */}
             <button
-              onClick={() => setView({ type: 'ROLE_SELECT' })}
+              onClick={() => { fecharSessao('admin'); setView({ type: 'ROLE_SELECT' }); }}
               className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
             >
-              Voltar
+              Sair
             </button>
           </div>
         );
@@ -326,7 +340,7 @@ const App: React.FC = () => {
                 onNavigate={(v) => setView({ type: v as any })}
               />
               <button
-                onClick={() => { fecharSessaoGestor(); setView({ type: 'ROLE_SELECT' }); }}
+                onClick={() => { fecharSessao('gestor'); setView({ type: 'ROLE_SELECT' }); }}
                 className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
               >
                 Sair do Admin
