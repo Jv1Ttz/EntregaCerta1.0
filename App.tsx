@@ -110,7 +110,9 @@ const App: React.FC = () => {
     const isValid = await db.verifyAdminPassword(adminPassword);
     if (isValid) {
       abrirSessaoGestor();
-      setView({ type: 'ADMIN_DASHBOARD' });
+      // Volta para onde a pessoa queria ir, não sempre para o Painel.
+      const destino = view.type === 'ADMIN_LOGIN' && view.destino ? view.destino : 'ADMIN_DASHBOARD';
+      setView({ type: destino });
       setAdminPassword('');
       setAdminLoginError('');
     } else {
@@ -199,21 +201,27 @@ const App: React.FC = () => {
                     </div>
                  </button>
 
-                 {/* Novo card de futura funcionalidade */}
+                 {/* Auditoria — protegida pela mesma senha do gestor, porque mostra
+                     o que foi excluído e o log de tudo que ele faz. Se a sessão de
+                     12h ainda vale, entra direto. */}
                  <button
                     type="button"
-                    onClick={() => setView({ type: 'ADMIN_AUDIT' })}
-                    className="w-full group bg-slate-900/40 dark:bg-slate-900/40 border border-dashed border-slate-600 hover:border-slate-400 transition-all p-6 rounded-2xl flex items-center justify-between shadow-inner"
+                    onClick={() => setView(
+                      sessaoGestorValida()
+                        ? { type: 'ADMIN_AUDIT' }
+                        : { type: 'ADMIN_LOGIN', destino: 'ADMIN_AUDIT' }
+                    )}
+                    className="w-full group bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-amber-400 dark:hover:border-amber-500 transition-all p-6 rounded-2xl flex items-center justify-between shadow-sm hover:shadow-md"
                  >
                     <div className="text-left">
-                       <h3 className="text-2xl font-bold text-slate-300 group-hover:text-slate-100">
-                         Administrador
+                       <h3 className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400">
+                         Auditoria
                        </h3>
-                       <p className="text-slate-500 text-sm mt-1">
-                         Em breve: novos recursos para o Admin.
+                       <p className="text-slate-500 dark:text-slate-400 mt-1">
+                         Histórico de atividades, devoluções e notas excluídas.
                        </p>
                     </div>
-                    <div className="h-14 w-14 bg-slate-800 rounded-full flex items-center justify-center text-slate-300 group-hover:text-yellow-300 group-hover:scale-110 transition-transform">
+                    <div className="h-14 w-14 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center text-amber-600 dark:text-amber-400 group-hover:scale-110 transition-transform">
                        <Crown size={28} />
                     </div>
                  </button>
@@ -298,8 +306,10 @@ const App: React.FC = () => {
         return (
           <div className="relative">
             <AdminAuditView />
+            {/* Agora que a Auditoria exige senha, "Voltar" leva ao Painel e não à
+                tela inicial: sair da sessão é papel do "Sair do Admin". */}
             <button
-              onClick={() => setView({ type: 'ROLE_SELECT' })}
+              onClick={() => setView({ type: 'ADMIN_DASHBOARD' })}
               className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
             >
               Voltar

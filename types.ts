@@ -185,7 +185,9 @@ export interface Zone {
 
 export type ViewState =
   | { type: 'ROLE_SELECT' }
-  | { type: 'ADMIN_LOGIN' }
+  /** `destino` guarda para onde ir depois de autenticar. Sem ele, quem clica em
+   *  Auditoria e digita a senha cairia no Painel, tendo que navegar de novo. */
+  | { type: 'ADMIN_LOGIN'; destino?: 'ADMIN_DASHBOARD' | 'ADMIN_AUDIT' }
   | { type: 'ADMIN_DASHBOARD' }
   | { type: 'ADMIN_AUDIT' }
   | { type: 'ADMIN_ROUTING' }

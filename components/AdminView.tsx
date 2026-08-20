@@ -4,7 +4,7 @@ import { geocodeInvoice as geocodeInvoiceShared } from '../services/geocode';
 import { sefazApi } from '../services/sefazApi';
 import { Driver, Invoice, DeliveryStatus, Vehicle, DeliveryProof, AppNotification, InvoiceItem, Route as RouteEntity } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
-import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight, Flag, CalendarClock, Plus } from 'lucide-react';
+import { Truck, Upload, Map as MapIcon, FileText, AlertOctagon, CheckCircle, AlertTriangle, Clock, ScanBarcode, X, Search, Loader2, UserPlus, Users, PlusCircle, CheckSquare, Square, Satellite, ExternalLink, Trash2, Eye, Calendar, User, KeyRound, Settings, Navigation2, RefreshCw, Zap, Filter, Download, Maximize2, DollarSign, TrendingUp, TrendingDown, Award, Sun, Moon, Printer, UploadCloud, FileCheck, XCircle, LayoutDashboard, RotateCw, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Package, Pencil, MoreVertical, Tag, Route, MapPin, GripVertical, ChevronLeft, ChevronRight, Flag, CalendarClock, Plus, ShieldCheck } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { ToastContainer } from './ui/Toast';
 import { LabelsView } from './LabelsView';
@@ -2079,6 +2079,12 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
 
             <button onClick={() => onNavigate?.('ADMIN_ZONES')} className="flex items-center justify-center gap-2 px-3 py-2 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 rounded-md transition-colors shadow-sm">
               <MapPin className="h-4 w-4" /> <span className="font-medium text-sm">Zonas</span>
+            </button>
+
+            {/* Até aqui a Auditoria só era alcançável pelo card da tela inicial —
+                ficava órfã em relação ao resto das ferramentas do gestor. */}
+            <button onClick={() => onNavigate?.('ADMIN_AUDIT')} className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-md transition-colors shadow-sm">
+              <ShieldCheck className="h-4 w-4" /> <span className="font-medium text-sm">Auditoria</span>
             </button>
 
             <button onClick={() => setShowAddVehicle(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
