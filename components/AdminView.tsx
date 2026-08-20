@@ -2084,7 +2084,7 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
             {/* Até aqui a Auditoria só era alcançável pelo card da tela inicial —
                 ficava órfã em relação ao resto das ferramentas do gestor. */}
             <button onClick={() => onNavigate?.('ADMIN_AUDIT')} className="flex items-center justify-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/30 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800 rounded-md transition-colors shadow-sm">
-              <ShieldCheck className="h-4 w-4" /> <span className="font-medium text-sm">Auditoria</span>
+              <ShieldCheck className="h-4 w-4" /> <span className="font-medium text-sm">Administrador</span>
             </button>
 
             <button onClick={() => setShowAddVehicle(true)} className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-slate-700 hover:bg-slate-50 dark:hover:bg-slate-600 text-slate-700 dark:text-white border border-slate-300 dark:border-slate-600 rounded-md transition-colors shadow-sm">
