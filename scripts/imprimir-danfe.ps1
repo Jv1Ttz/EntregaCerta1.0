@@ -66,8 +66,18 @@ $IMPRESSORA = "logistica (WF-M5799 Series)"
 # dias desligado: ao ligar, ele não despeja o acumulado inteiro na impressora.
 $MAX_HORAS = 12
 
-# Quantas notas no máximo por ciclo — trava de segurança contra enxurrada.
+# Quantas notas no máximo IMPRIMIR por ciclo — trava contra enxurrada.
 $MAX_POR_CICLO = 30
+
+# Quantas notas BUSCAR por ciclo. Tem que ser bem maior que o movimento de
+# $MAX_HORAS, e não se confunde com o teto de impressão acima.
+#
+# Em 27/08 a impressão parou em silêncio por causa dessa confusão: a busca usava
+# o mesmo 30 do teto de impressão, com order=created_at.asc. Quando a janela de
+# 12h passou de 30 notas, o agente passou a receber sempre as 30 MAIS ANTIGAS —
+# todas já impressas — concluía "zero notas novas" e saía calado. Ficaram 9 notas
+# presas atrás do teto, das 14h42 às 16h45, sem uma linha de erro no log.
+$MAX_BUSCA = 500
 
 # Prazo máximo de um ciclo. Passou disso, ele se encerra sozinho: rodada travada
 # não pode segurar o mutex e derrubar a impressão das notas seguintes.
@@ -526,7 +536,7 @@ $filtro = "select=id,number,series,access_key,pdf_url,customer_name,customer_add
           "&pdf_url=not.is.null" +
           "&deleted_at=is.null" +
           "&order=created_at.asc" +
-          "&limit=$MAX_POR_CICLO"
+          "&limit=$MAX_BUSCA"
 
 try {
   $json  = BuscarComPrazo "$SUPABASE_URL/rest/v1/etiqueta_expedicao?$filtro" @{
@@ -547,7 +557,17 @@ $novas = @($notas | Where-Object {
 })
 if ($novas.Count -eq 0) { BaterPonto; exit 0 }   # nada novo: sai quieto, mas vivo
 
-Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
+# O teto de impressão entra AQUI, sobre o que falta imprimir — nunca na consulta.
+# Aplicado na busca, ele escondia as notas mais recentes atrás das mais antigas
+# e a fila parava sem erro nenhum. Como a ordem é a de chegada, a sobra sai no
+# ciclo seguinte, e o galpão fica sabendo que existe sobra.
+$totalPendentes = $novas.Count
+if ($totalPendentes -gt $MAX_POR_CICLO) {
+  $novas = @($novas | Select-Object -First $MAX_POR_CICLO)
+  Registrar "$totalPendentes nota(s) pendente(s): imprimindo $MAX_POR_CICLO agora, o resto no proximo ciclo"
+} else {
+  Registrar "$($novas.Count) nota(s) nova(s) para imprimir"
+}
 
 $orcamentoEtiquetas = $MAX_ETIQUETAS_POR_CICLO
 
