@@ -166,7 +166,19 @@ function BaterPonto {
 function Registrar($texto) {
   $linha = "{0}  {1}" -f (Get-Date -Format "dd/MM HH:mm:ss"), $texto
   Write-Host $linha
-  Add-Content -Path $ARQ_LOG -Value $linha -Encoding utf8
+  # Uma tentativa a mais: se alguem estiver LENDO o log neste instante (tail,
+  # bloco de notas), o Add-Content falha e a linha se perde calada. Aconteceu em
+  # 27/08 com a NF 36360, que imprimiu 5 etiquetas sem deixar registro. O log e
+  # a unica janela para dentro deste agente — perder linha logo quando alguem
+  # esta investigando e o pior momento possivel.
+  for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
+    try {
+      Add-Content -Path $ARQ_LOG -Value $linha -Encoding utf8 -ErrorAction Stop
+      break
+    } catch {
+      Start-Sleep -Milliseconds 150
+    }
+  }
 }
 
 # ─────────────────────────── ETIQUETA (ZPL) ───────────────────────────
