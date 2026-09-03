@@ -222,7 +222,7 @@ export const db = {
       'id,access_key,number,series,customer_name,customer_doc,customer_address,' +
       'customer_zip,value,status,driver_id,vehicle_id,created_at,return_value,' +
       'delivered_at,delivery_attempts,last_failure_reason,original_value,lat,lng,' +
-      'return_final_status,return_finalized_at,return_final_note,pdf_url,' +
+      'return_final_status,return_finalized_at,return_final_note,pdf_url,xml_url,' +
       'cargo_volume_count,cargo_volume_type,cargo_weight_net,cargo_weight_gross,' +
       'deleted_at,deleted_by,deleted_reason,route_id,vendedor,referencia,obs_nf,' +
       'end_logradouro,end_bairro,end_municipio,end_uf';

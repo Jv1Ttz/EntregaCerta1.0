@@ -577,9 +577,19 @@ const DeletedInvoicesTab: React.FC = () => {
 
 // ─── Aba: Logs de Atividade ──────────────────────────────────────────────────
 
+// Quantos registros a tela desenha por vez. Mesmo padrão das abas de Devoluções
+// e Notas excluídas — esta ficou de fora quando as outras foram paginadas, e
+// desenhava os 500 registros de uma vez: a página não acabava mais de rolar.
+const LOG_PAGE = 50;
+
+// Teto que o db.getLogs aplica na consulta. Precisa bater com o limit(500) de
+// lá: é ele que diz se a lista veio cortada, e o usuário tem que saber disso.
+const LOG_TETO = 500;
+
 const ActivityLogsTab: React.FC = () => {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(LOG_PAGE);
   const [filterType, setFilterType] = useState<ActivityLogEventType | ''>('');
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
@@ -612,6 +622,18 @@ const ActivityLogsTab: React.FC = () => {
       JSON.stringify(l.detalhe ?? {}).toLowerCase().includes(term)
     );
   }, [logs, search]);
+
+  // Volta ao topo da paginação sempre que o conjunto filtrado muda.
+  useEffect(() => {
+    setVisibleCount(LOG_PAGE);
+  }, [filterType, filterStart, filterEnd, filterNf, filterAtor, search]);
+
+  const visiveis = filtered.slice(0, visibleCount);
+
+  // A consulta bateu no teto: existem registros mais antigos que a tela nem
+  // recebeu. Sem avisar, o log parece completo e não está — o mesmo tipo de
+  // silêncio que fez a impressão parar por duas horas sem ninguém notar.
+  const veioCortado = logs.length >= LOG_TETO;
 
   const hasFilter = !!(filterType || filterStart || filterEnd || filterNf || filterAtor || search);
 
@@ -716,8 +738,14 @@ const ActivityLogsTab: React.FC = () => {
       ) : (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-            {filtered.length} registro(s) encontrado(s)
+            Mostrando {visiveis.length} de {filtered.length} registro(s)
           </div>
+          {veioCortado && (
+            <div className="px-4 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800">
+              Só os {LOG_TETO} eventos mais recentes foram carregados. Existem
+              registros mais antigos — use os filtros de data para alcançá-los.
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs md:text-sm text-left text-slate-700 dark:text-slate-200">
               <thead className="bg-slate-100 dark:bg-slate-900 text-[11px] uppercase text-slate-500 dark:text-slate-400">
@@ -730,7 +758,7 @@ const ActivityLogsTab: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(log => {
+                {visiveis.map(log => {
                   const temDetalhe = log.detalhe && Object.values(log.detalhe).some(v => v !== null && v !== undefined && v !== '');
                   const aberto = expandido === log.id;
                   return (
@@ -801,6 +829,16 @@ const ActivityLogsTab: React.FC = () => {
               </tbody>
             </table>
           </div>
+          {visiveis.length < filtered.length && (
+            <div className="px-4 py-3 text-center border-t border-slate-100 dark:border-slate-700">
+              <button
+                onClick={() => setVisibleCount(c => c + LOG_PAGE)}
+                className="text-sm font-semibold text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 px-4 py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                Ver mais {Math.min(LOG_PAGE, filtered.length - visiveis.length)} de {filtered.length - visiveis.length} restante(s)
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

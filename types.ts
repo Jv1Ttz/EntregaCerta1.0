@@ -81,6 +81,9 @@ export interface Invoice {
   return_final_note?: string | null;
   /** Link público para PDF (DANFE) — opcional, salvo pelo n8n/Drive */
   pdf_url?: string | null;
+  /** Link público para o XML da NF-e — só existe em notas emitidas depois que a
+   * ingestão passou a salvá-lo (ver services/db.ts); notas antigas ficam null. */
+  xml_url?: string | null;
   /** Soft delete: data/hora em que a nota foi marcada como excluída pelo gestor */
   deleted_at?: string | null;
   /** Soft delete: identificador de quem excluiu (por enquanto usamos 'ADMIN') */

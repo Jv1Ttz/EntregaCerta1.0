@@ -1940,6 +1940,18 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
               </button>
             )}
 
+            {/* XML da Nota — só existe em notas emitidas depois que a
+                ingestão passou a salvá-lo; notas antigas não têm o link. */}
+            {inv.xml_url && (
+              <button
+                onClick={() => window.open(inv.xml_url, '_blank')}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-amber-50 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
+              >
+                <FileText size={16} />
+                <span>Baixar XML da Nota</span>
+              </button>
+            )}
+
             {/* Rastrear no SSW — somente para TRANSPORTADORA */}
             {drivers.find(d => d.id === inv.driver_id)?.name?.toUpperCase() === 'TRANSPORTADORA' && (
               <button
