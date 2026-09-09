@@ -204,8 +204,24 @@ export const db = {
     return `${total.count ?? -1}|${entregues.count ?? -1}|${emRota.count ?? -1}`;
   },
 
+  /**
+   * Janela do painel do gestor, em dias.
+   *
+   * O painel não precisa da operação inteira em memória: precisa do que está em
+   * andamento e do passado recente. Carregar tudo custava 6,3 MB por atualização
+   * — e como o painel recarrega a cada nota nova ou baixa de entrega, um único
+   * painel aberto o dia todo consumia centenas de MB.
+   *
+   * Medido em 09/09/2026, com a cota de saída de dados em 97%: das 4.987 notas,
+   * só 701 se encaixam na janela — 86% menos. A conta caiu de ~192 MB/dia para
+   * ~27 MB/dia.
+   *
+   * Para voltar ao comportamento anterior, é só pôr 0 aqui.
+   */
+  JANELA_PAINEL_DIAS: 30,
+
   getInvoices: async (): Promise<Invoice[]> => {
-    // Busca TODAS as notas (sem limite de data) em múltiplos lotes,
+    // Busca as notas em múltiplos lotes,
     // para contornar o limite de ~1000 linhas por requisição do PostgREST.
     //
     // SEM a coluna `items`: ela é metade do peso de cada nota (~806 de ~1619
@@ -230,10 +246,22 @@ export const db = {
     while (true) {
       const to = from + pageSize - 1;
 
-      const { data, error } = await supabase
+      // Recente OU ainda não entregue. O segundo termo é o que garante que nada
+      // pendente suma: PENDING, IN_PROGRESS e FAILED entram sempre, por mais
+      // antigos que sejam — inclusive as devoluções em aberto, que vivem como
+      // FAILED sem return_final_status. Conferido: zero notas antigas já
+      // entregues tinham devolução pendente.
+      let consulta = supabase
         .from('invoices')
         .select(COLUNAS_SEM_ITEMS)
-        .is('deleted_at', null)
+        .is('deleted_at', null);
+
+      if (db.JANELA_PAINEL_DIAS > 0) {
+        const corte = new Date(Date.now() - db.JANELA_PAINEL_DIAS * 86400000).toISOString();
+        consulta = consulta.or(`created_at.gte.${corte},status.neq.${DeliveryStatus.DELIVERED}`);
+      }
+
+      const { data, error } = await consulta
         .order('created_at', { ascending: false })
         .order('id', { ascending: false }) // desempate único: estabiliza a paginação e evita notas duplicadas entre lotes
         .range(from, to);
