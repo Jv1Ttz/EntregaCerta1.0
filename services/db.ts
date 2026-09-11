@@ -216,9 +216,17 @@ export const db = {
    * só 701 se encaixam na janela — 86% menos. A conta caiu de ~192 MB/dia para
    * ~27 MB/dia.
    *
-   * Para voltar ao comportamento anterior, é só pôr 0 aqui.
+   * DESLIGADA (0) desde 11/09/2026, quando o EntregaCerta saiu do Supabase
+   * gerenciado para o servidor próprio: lá não existe cota de saída de dados, e
+   * o motivo acabou. Ligada, ela tinha um custo que não aparecia — as notas
+   * entregues há mais de 30 dias sumiam de quatro telas (Painel do Gestor,
+   * Vendedor, Roteirização e Administrador → Devoluções) e o painel dizia
+   * "Mostrando 713 de 713 notas" com 5.120 no banco, como se fosse tudo.
+   *
+   * Se um dia voltar a precisar, é pôr o número de dias aqui — o filtro já
+   * preserva tudo que não foi entregue.
    */
-  JANELA_PAINEL_DIAS: 30,
+  JANELA_PAINEL_DIAS: 0,
 
   getInvoices: async (): Promise<Invoice[]> => {
     // Busca as notas em múltiplos lotes,
