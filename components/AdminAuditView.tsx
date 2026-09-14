@@ -538,9 +538,15 @@ const DeletedInvoicesTab: React.FC = () => {
                       disabled={deletingId === inv.id || restoringId === inv.id}
                       onClick={async () => {
                         if (!window.confirm('Excluir definitivamente esta nota e seus comprovantes? Esta ação não pode ser desfeita.')) return;
+                        const senhaAdmin = window.prompt('Digite a senha do Administrador para confirmar a exclusão definitiva:');
+                        if (!senhaAdmin) return;
                         try {
                           setDeletingId(inv.id);
-                          await db.hardDeleteInvoice(inv.id);
+                          const excluiu = await db.hardDeleteInvoice(inv.id, senhaAdmin);
+                          if (!excluiu) {
+                            alert('Senha do Administrador incorreta. A nota não foi excluída.');
+                            return;
+                          }
                           setDeletedInvoices(prev => prev.filter(d => d.id !== inv.id));
                         } catch (e) {
                           alert('Erro ao excluir nota definitivamente.');

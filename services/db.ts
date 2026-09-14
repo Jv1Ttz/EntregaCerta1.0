@@ -419,29 +419,28 @@ export const db = {
     return (data as Invoice[]) || [];
   },
 
-  // Exclusão definitiva: remove nota e comprovantes do banco (usar apenas em auditoria)
-  hardDeleteInvoice: async (invoiceId: string) => {
-    // Remove comprovantes associados
-    const { error: proofError } = await supabase
-      .from('delivery_proofs')
-      .delete()
-      .eq('invoice_id', invoiceId);
-
-    if (proofError) {
-      console.error('Erro ao apagar comprovantes da nota:', proofError);
-      throw proofError;
-    }
-
-    // Remove nota definitivamente
-    const { error } = await supabase
-      .from('invoices')
-      .delete()
-      .eq('id', invoiceId);
+  /**
+   * Exclusão definitiva: remove nota e comprovantes (usar apenas em auditoria).
+   *
+   * Passa pela função do servidor desde 14/09/2026. Antes o navegador apagava
+   * direto nas tabelas — e, como a chave pública está no site, qualquer pessoa
+   * que abrisse o .js podia apagar todas as notas. Agora a chave pública não tem
+   * mais permissão de apagar; a função confere a senha do Administrador, só aceita
+   * nota que já está na lixeira e apaga comprovantes e nota juntos.
+   *
+   * Devolve false quando a senha está errada (nada é apagado).
+   */
+  hardDeleteInvoice: async (invoiceId: string, senhaAdmin: string): Promise<boolean> => {
+    const { data, error } = await supabase.rpc('excluir_nota_definitivo', {
+      nota_id: invoiceId,
+      senha_admin: senhaAdmin,
+    });
 
     if (error) {
       console.error('Erro ao apagar nota (hard delete):', error);
       throw error;
     }
+    return data === true;
   },
 
 //Trecho que mudei a logica do em rota 👇
