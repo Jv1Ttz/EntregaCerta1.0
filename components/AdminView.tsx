@@ -772,6 +772,8 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
     };
 
     const newInvoices: Invoice[] = [];
+    // XML original de cada nota da fila, para anexar depois de ela existir no banco.
+    const xmlPorNota: Record<string, string> = {};
     const parser = new DOMParser();
 
     // Cria uma Promessa para cada arquivo (para ler tudo junto)
@@ -891,8 +893,10 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
                 results.details.push(`⚠️ NF ${nNF}: Nota já lançada no sistema.`);
             } else {
                 // Adiciona na fila para salvar
+                const novoId = `inv-${Date.now()}-${Math.random()}`;
+                xmlPorNota[novoId] = text;
                 newInvoices.push({
-                  id: `inv-${Date.now()}-${Math.random()}`,
+                  id: novoId,
                   access_key: chNFe || `GEN${Date.now()}`, 
                   number: nNF,
                   series: serie || '0',
@@ -929,6 +933,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ toggleTheme, theme, onNavi
     // Salva os válidos no banco
     if (newInvoices.length > 0) {
         await Promise.all(newInvoices.map(inv => db.addInvoice(inv)));
+
+        // Anexa o XML de cada nota (o arquivo que o gestor acabou de escolher).
+        // Feito DEPOIS do insert porque o anexo atualiza a linha que precisa existir.
+        // Falha aqui não invalida a importação: a nota fica sem o arquivo e o
+        // relatório diz quais, para não virar perda silenciosa.
+        const semXml = (await Promise.all(newInvoices.map(async (inv) => {
+          const xml = xmlPorNota[inv.id];
+          if (!xml) return inv.number;
+          return (await db.uploadInvoiceXml(inv.id, xml)) ? null : inv.number;
+        }))).filter((n): n is string => Boolean(n));
+
+        if (semXml.length > 0) {
+          results.details.push(`⚠️ NF ${semXml.join(', ')}: nota importada, mas o XML não foi guardado.`);
+        }
+
         await refreshData();
     }
 
@@ -1944,7 +1963,12 @@ const requestSort = (key: string, _event: React.MouseEvent) => {
                 ingestão passou a salvá-lo; notas antigas não têm o link. */}
             {inv.xml_url && (
               <button
-                onClick={() => window.open(inv.xml_url, '_blank')}
+                onClick={async () => {
+                  // Pode ser link do Drive (e-mail) ou caminho no bucket (importação).
+                  const url = await db.resolveInvoiceXmlUrl(inv.xml_url);
+                  if (url) window.open(url, '_blank');
+                  else alert('Não foi possível abrir o XML desta nota.');
+                }}
                 className="w-full flex items-center gap-2 px-3 py-2 hover:bg-amber-50 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300"
               >
                 <FileText size={16} />

@@ -1171,6 +1171,75 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   },
 
   /**
+   * Guarda o XML de uma nota importada na tela e devolve o CAMINHO no bucket.
+   *
+   * Até 23/09/2026 a importação por XML lia o arquivo, extraía os dados e o
+   * descartava. A nota nascia sem nenhuma NF-e anexada e o Painel não tinha o que
+   * oferecer para baixar — só as notas que entram por e-mail ganham link, porque a
+   * ingestão sobe o arquivo no Drive. O XML estava ali, na mão do navegador;
+   * faltava apenas guardá-lo.
+   *
+   * Vai no bucket das fotos, sob o prefixo `xml-notas/`, por dois motivos: o app
+   * já tem permissão de escrita nele, e o backup diário baixa esse bucket inteiro,
+   * então o XML passa a ser copiado para o PC do escritório junto com as fotos.
+   *
+   * Devolve null quando falha: anexo é o extra, a nota importada é o essencial —
+   * quem chama decide o que fazer, e nunca deixa de importar por causa disto.
+   */
+  uploadInvoiceXml: async (invoiceId: string, xmlText: string): Promise<string | null> => {
+    if (!xmlText) return null;
+    try {
+      const blob = new Blob([xmlText], { type: 'application/xml' });
+      const path = `xml-notas/${invoiceId}.xml`;
+      const { error } = await supabase.storage
+        .from(PROOF_BUCKET)
+        .upload(path, blob, { contentType: 'application/xml', upsert: true });
+      if (error) {
+        console.error(`Erro ao guardar o XML da nota ${invoiceId}:`, error);
+        return null;
+      }
+      const { error: erroBanco } = await supabase
+        .from('invoices')
+        .update({ xml_url: path })
+        .eq('id', invoiceId);
+      if (erroBanco) {
+        console.error(`XML guardado, mas a nota ${invoiceId} não foi atualizada:`, erroBanco);
+        return null;
+      }
+      return path;
+    } catch (e) {
+      console.error(`Falha ao guardar o XML da nota ${invoiceId}:`, e);
+      return null;
+    }
+  },
+
+  /**
+   * Transforma o xml_url guardado em algo que o navegador abre.
+   *
+   * Existem duas origens: link público do Drive (notas que entram por e-mail) e
+   * caminho no bucket (notas importadas na tela, desde 23/09/2026). O primeiro
+   * passa direto; o segundo vira URL assinada de 1 hora, igual às fotos de
+   * comprovante. Devolve '' se não der — o chamador avisa o usuário.
+   */
+  resolveInvoiceXmlUrl: async (value?: string | null): Promise<string> => {
+    if (!value) return '';
+    if (value.startsWith('http')) return value;
+    try {
+      const { data, error } = await supabase.storage
+        .from(PROOF_BUCKET)
+        .createSignedUrl(value, 3600);
+      if (error || !data?.signedUrl) {
+        console.error('Erro ao gerar link do XML:', error);
+        return '';
+      }
+      return data.signedUrl;
+    } catch (e) {
+      console.error('Falha ao resolver o XML da nota:', e);
+      return '';
+    }
+  },
+
+  /**
    * Busca comprovantes de várias notas de uma vez, indexados por invoice_id.
    * Omite signature_data/photo_url/photo_stub_url de propósito: são base64 de
    * centenas de MB no total e estourariam o tráfego numa listagem.
