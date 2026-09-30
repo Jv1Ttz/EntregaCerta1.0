@@ -60,6 +60,41 @@ function Registrar($texto) {
   }
 }
 
+# Segunda camada de vigilancia do agente de impressao.
+#
+# POR QUE EXISTE: em 30/09/2026 o Agendador do Windows parou de disparar as tarefas
+# de minuto em minuto. A impressao ficou 2h40 parada e o vigia NAO avisou -- porque
+# ele roda no mesmo agendador e parou junto. Vigia que morre com o vigiado nao vale.
+# Este backup roda numa tarefa separada, uma vez por dia, entao e um segundo par de
+# olhos: se o agente nao bate ponto ha mais de uma hora, alguem fica sabendo.
+function VerificarAgente {
+  $ponto = Join-Path $PASTA 'ultima-rodada.txt'
+  if (-not (Test-Path $ponto)) { Registrar 'agente: ATENCAO - nao existe marca de rodada (ultima-rodada.txt)'; return }
+  $quando = try { [datetime]::Parse((Get-Content $ponto -Raw).Trim()) } catch { $null }
+  if (-not $quando) { Registrar 'agente: ATENCAO - nao consegui ler a marca de rodada'; return }
+
+  $minutos = [int]((Get-Date) - $quando).TotalMinutes
+  if ($minutos -le 60) { Registrar ("agente de impressao: ok (ultima rodada ha {0} min)" -f $minutos); return }
+
+  $texto = "O agente de impressao nao completa um ciclo ha $minutos minutos " +
+           "(ultima: $($quando.ToString('dd/MM HH:mm'))). Notas que chegarem NAO estao sendo impressas."
+  Registrar "agente: ALERTA - $texto"
+  # Vai para o mesmo alertas.log do vigia, que e onde o suporte ja olha.
+  try { Add-Content -Path (Join-Path $PASTA 'alertas.log') -Value ("{0}  ALERTA (backup) - agente parado ha {1} min" -f (Get-Date -Format 'dd/MM HH:mm:ss'), $minutos) -Encoding utf8 } catch { }
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    $ico = New-Object System.Windows.Forms.NotifyIcon
+    $ico.Icon = [System.Drawing.SystemIcons]::Warning
+    $ico.BalloonTipIcon = 'Warning'
+    $ico.BalloonTipTitle = 'EntregaCerta - impressao parada'
+    $ico.BalloonTipText = $texto
+    $ico.Visible = $true
+    $ico.ShowBalloonTip(20000)
+    Start-Sleep -Seconds 12
+    $ico.Dispose()
+  } catch { }
+}
+
 function LerConfig {
   $cfg = @{}
   Get-Content (Join-Path $PASTA '.local.txt') -Encoding UTF8 | ForEach-Object {
@@ -186,6 +221,7 @@ try {
   $cfg   = LerConfig
   $banco = BuscarBanco $cfg
   $fotos = BuscarFotos $cfg
+  VerificarAgente
   $min   = ((Get-Date) - $inicio).TotalMinutes
   $resumo = "banco mais recente {0} ({1} baixado(s)); fotos: {2} no servidor, {3} nova(s) ({4:N1} MB), {5} falha(s); {6:N1} min" -f `
     $banco.maisNovo, $banco.baixados, $fotos.total, $fotos.novas, ($fotos.bytes / 1MB), $fotos.falhas, $min
