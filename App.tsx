@@ -10,45 +10,28 @@ import { RoteirizacaoView } from './components/RoteirizacaoView';
 import { ZonasView } from './components/ZonasView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
 
-/**
- * Sessão do gestor.
- *
- * Antes, o painel voltava para a tela de escolha de perfil a cada F5 — o estado
- * de login só existia na memória do React. Reclamação recorrente dos usuários.
- *
- * Guarda apenas o INSTANTE EM QUE A SESSÃO EXPIRA, nunca a senha. Prazo em vez
- * de "para sempre" porque o painel roda em máquina compartilhada no escritório:
- * navegador esquecido aberto na sexta não deve continuar logado na segunda.
- */
-type Perfil = 'gestor' | 'admin';
+import { Perfil, sessaoValida, encerrarSessao, entrar, usarPerfil, EVENTO_SESSAO_EXPIRADA } from './services/sessao';
 
 /**
- * Uma sessão POR PERFIL. Painel do Gestor e tela de Administrador têm senhas
- * diferentes, então precisam de sessões diferentes: com uma sessão só, quem
- * entrasse como gestor abriria o Administrador sem a segunda senha, e a
- * separação viraria enfeite.
+ * De qual painel é cada tela — e portanto qual token vai nas requisições dela.
+ * Uma sessão POR PERFIL: Painel do Gestor e tela de Administrador têm senhas
+ * diferentes, e com uma sessão só quem entrasse como gestor abriria o
+ * Administrador sem a segunda senha. Tela inicial e app do motorista não usam
+ * token de painel nenhum.
  */
-const CHAVE_SESSAO: Record<Perfil, string> = {
-  gestor: 'ec-sessao-gestor',
-  admin: 'ec-sessao-admin',
-};
-const HORAS_DE_SESSAO = 12;
-
-function sessaoValida(perfil: Perfil): boolean {
-  try {
-    const ate = Number(localStorage.getItem(CHAVE_SESSAO[perfil]));
-    if (Number.isFinite(ate) && Date.now() < ate) return true;
-    localStorage.removeItem(CHAVE_SESSAO[perfil]);   // expirada: limpa o rastro
-  } catch { /* navegador sem localStorage: cai no login, que é o comportamento antigo */ }
-  return false;
-}
-
-function abrirSessao(perfil: Perfil) {
-  try { localStorage.setItem(CHAVE_SESSAO[perfil], String(Date.now() + HORAS_DE_SESSAO * 3600 * 1000)); } catch { }
-}
-
-function fecharSessao(perfil: Perfil) {
-  try { localStorage.removeItem(CHAVE_SESSAO[perfil]); } catch { }
+function perfilDaTela(tipo: string): Perfil | null {
+  switch (tipo) {
+    case 'ADMIN_DASHBOARD':
+    case 'ADMIN_ROUTING':
+    case 'ADMIN_ZONES':
+      return 'gestor';
+    case 'ADMIN_AUDIT':
+      return 'admin';
+    case 'SELLER_VIEW':
+      return 'vendedor';
+    default:
+      return null;
+  }
 }
 
 const App: React.FC = () => {
@@ -56,7 +39,19 @@ const App: React.FC = () => {
   const [view, setView] = useState<ViewState>(() =>
     sessaoValida('gestor') ? { type: 'ADMIN_DASHBOARD' } : { type: 'ROLE_SELECT' }
   );
-  
+
+  // Definido DURANTE a renderização, não num efeito: os efeitos dos filhos rodam
+  // antes dos do pai, e a primeira busca de dados do painel sairia sem token.
+  usarPerfil(perfilDaTela(view.type));
+
+  // O servidor recusou o token no meio do uso (expirou): volta para o início
+  // em vez de deixar o painel aberto e vazio.
+  useEffect(() => {
+    const aoExpirar = () => setView({ type: 'ROLE_SELECT' });
+    window.addEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
+    return () => window.removeEventListener(EVENTO_SESSAO_EXPIRADA, aoExpirar);
+  }, []);
+
   // Theme State
   const [theme, setTheme] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -121,9 +116,8 @@ const App: React.FC = () => {
     // O destino define QUAL senha vale: a tela de Administrador tem a sua.
     const destino = view.type === 'ADMIN_LOGIN' && view.destino ? view.destino : 'ADMIN_DASHBOARD';
     const perfil: Perfil = destino === 'ADMIN_AUDIT' ? 'admin' : 'gestor';
-    const isValid = await db.verifyAdminPassword(adminPassword, perfil);
-    if (isValid) {
-      abrirSessao(perfil);
+    // O servidor confere a senha e devolve o token; sem token não há sessão.
+    if (await entrar(perfil, adminPassword)) {
       setView({ type: destino });
       setAdminPassword('');
       setAdminLoginError('');
@@ -323,7 +317,7 @@ const App: React.FC = () => {
                 não haveria como sair a não ser esperando as 12h — e esta é a
                 área mais sensível das duas. */}
             <button
-              onClick={() => { fecharSessao('admin'); setView({ type: 'ROLE_SELECT' }); }}
+              onClick={() => { encerrarSessao('admin'); setView({ type: 'ROLE_SELECT' }); }}
               className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
             >
               Sair
@@ -340,7 +334,7 @@ const App: React.FC = () => {
                 onNavigate={(v) => setView({ type: v as any })}
               />
               <button
-                onClick={() => { fecharSessao('gestor'); setView({ type: 'ROLE_SELECT' }); }}
+                onClick={() => { encerrarSessao('gestor'); setView({ type: 'ROLE_SELECT' }); }}
                 className="fixed bottom-4 right-4 bg-slate-800 text-white text-xs px-3 py-2 rounded-full shadow-lg opacity-70 hover:opacity-100 transition-opacity z-50"
               >
                 Sair do Admin

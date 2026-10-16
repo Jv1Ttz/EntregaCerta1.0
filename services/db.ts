@@ -1387,41 +1387,10 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
     return (data as ActivityLog[]) || [];
   },
 
-  /**
-   * Confere a senha do gestor NO BANCO, não no navegador.
-   *
-   * Antes isto comparava com import.meta.env.VITE_ADMIN_PASSWORD. O Vite embute
-   * variáveis VITE_* no bundle, então a senha ficava em texto puro no .js que
-   * qualquer visitante baixa — conferido no dist publicado. Agora o navegador
-   * envia o que foi digitado e recebe só true/false; a senha vive apenas como
-   * hash bcrypt na tabela app_credenciais, que não é legível pela API.
-   *
-   * A variável antiga continua servindo de RESERVA, para o caso de a função não
-   * responder (rede caída, migração revertida). Sem isso, uma falha de rede
-   * trancaria o gestor fora do painel — e a senha antiga já era pública de
-   * qualquer forma, então a reserva não abre nada que já não estivesse aberto.
-   * Quando a nova via estiver rodando por alguns dias, dá para remover a
-   * variável da Vercel e a reserva morre sozinha.
-   */
-  verifyAdminPassword: async (passwordInput: string, perfil: 'gestor' | 'admin' = 'gestor'): Promise<boolean> => {
-    if (!passwordInput) return false;
-    try {
-      const { data, error } = await supabase.rpc('verificar_senha', {
-        perfil,
-        senha_digitada: passwordInput,
-      });
-      if (!error && typeof data === 'boolean') return data;
-      console.error('Verificação de senha no servidor falhou:', error);
-    } catch (e) {
-      console.error('Verificação de senha no servidor indisponível:', e);
-    }
-    // Reserva só para o gestor, e só quando a função NÃO respondeu (rede caída).
-    // Não vale para o admin: aquela senha nunca esteve no bundle e não deve
-    // passar a estar. Senha errada não chega aqui — a função já respondeu false.
-    if (perfil !== 'gestor') return false;
-    const reserva = import.meta.env.VITE_ADMIN_PASSWORD;
-    return Boolean(reserva) && passwordInput === reserva;
-  },
+  // O login dos painéis saiu daqui: quem confere a senha e emite o token agora
+  // é o servidor (login_painel), chamado por services/sessao.ts. O antigo
+  // verifyAdminPassword devolvia true/false para o navegador decidir — e tinha
+  // uma "senha reserva" (VITE_ADMIN_PASSWORD) que ia embutida no .js publicado.
 
   updateAdminPassword: async (newPassword: string) => {
     alert("Configuração de senha deve ser feita via Variáveis de Ambiente no Supabase/Vercel.");

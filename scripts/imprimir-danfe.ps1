@@ -91,6 +91,11 @@ $TIMEOUT_IMPRESSAO_S = 90
 
 $PASTA        = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SUMATRA      = Join-Path $PASTA "SumatraPDF.exe"
+$ARQ_TOKEN    = Join-Path $PASTA "supabase-token.txt"
+# Token proprio do agente (papel agente_impressao: so le a view da etiqueta).
+# Fica num arquivo FORA deste script porque o script vive no git. Sem o arquivo,
+# usa a chave publica, como sempre foi: assim a troca nao depende de ordem.
+$SUPABASE_TOKEN = if (Test-Path $ARQ_TOKEN) { (Get-Content $ARQ_TOKEN -Raw).Trim() } else { $SUPABASE_KEY }
 $ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: DANFEs que já saíram
 # Etiqueta tem memória PRÓPRIA de propósito. Se as duas compartilhassem o mesmo
 # controle, uma falha só (impressora de etiqueta offline, por exemplo) faria o
@@ -553,7 +558,7 @@ $filtro = "select=id,number,series,access_key,pdf_url,customer_name,customer_add
 try {
   $json  = BuscarComPrazo "$SUPABASE_URL/rest/v1/etiqueta_expedicao?$filtro" @{
     apikey        = $SUPABASE_KEY
-    Authorization = "Bearer $SUPABASE_KEY"
+    Authorization = "Bearer $SUPABASE_TOKEN"
   } 25
   $notas = $json | ConvertFrom-Json
 } catch {

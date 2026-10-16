@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
+import { sessaoValida, entrar, encerrarSessao } from '../services/sessao';
 import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
@@ -72,27 +73,12 @@ const formatCurrency = (value?: number) => {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-/**
- * Sessão do vendedor — sessionStorage, não localStorage.
- *
- * Antes, todo F5 pedia a senha de novo: o estado só existia na memória do React.
- * Reclamação recorrente. Mas aqui a sessão é deliberadamente MAIS CURTA que a do
- * gestor e a do admin (12h em localStorage): esta tela mostra as ~4.500 notas de
- * todas as empresas, a frota, e o comprovante completo — com foto, assinatura e
- * CPF do recebedor —, tudo atrás de uma senha única compartilhada pela equipe.
- *
- * sessionStorage resolve o F5, que é a queixa real, e some quando o navegador
- * fecha. Num computador de balcão, ninguém herda a sessão de quem usou antes.
- */
-const SESSAO_VENDEDOR = 'ec-sessao-vendedor';
-
-function sessaoVendedorAtiva(): boolean {
-  try { return sessionStorage.getItem(SESSAO_VENDEDOR) === '1'; }
-  catch { return false; }   // sem sessionStorage: pede senha, como era antes
-}
+// Sessão do vendedor: token emitido pelo servidor, guardado em sessionStorage
+// (some ao fechar o navegador — tela de balcão, senha compartilhada pela equipe).
+// Detalhes em services/sessao.ts.
 
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
-  const [authenticated, setAuthenticated] = useState(sessaoVendedorAtiva);
+  const [authenticated, setAuthenticated] = useState(() => sessaoValida('vendedor'));
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -350,21 +336,10 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     e.preventDefault();
     setLoginLoading(true);
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-      const res = await fetch(`${supabaseUrl}/functions/v1/verify-seller-password`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-        body: JSON.stringify({ password: passwordInput }),
-      });
-      const data = await res.json();
-      if (data.valid) {
-        // Marca só que houve login. A senha nunca é guardada, nem o hash: quem
-        // confere é a Edge Function, e ela é consultada de novo a cada login.
-        try { sessionStorage.setItem(SESSAO_VENDEDOR, '1'); } catch { }
+      // Quem confere é o servidor, e ele só devolve o token se a senha bate.
+      // Antes a Edge Function respondia {valid:true/false} e esta tela decidia
+      // sozinha — adulterar a resposta abria a lista inteira de notas.
+      if (await entrar('vendedor', passwordInput)) {
         setAuthenticated(true);
         setPasswordError(false);
       } else {
@@ -491,7 +466,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
               e clicasse em Vendedor de novo entraria direto — e num computador
               compartilhado a pessoa seguinte herdaria o acesso. */}
           <button
-            onClick={() => { try { sessionStorage.removeItem(SESSAO_VENDEDOR); } catch { } onBack(); }}
+            onClick={() => { encerrarSessao('vendedor'); onBack(); }}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <ChevronLeft size={20} />

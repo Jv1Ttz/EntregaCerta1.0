@@ -319,6 +319,9 @@ function VigiarFila {
   $maxHoras = ValorDe '^\$MAX_HORAS\s*='
   if (-not $url -or -not $chave -or $chave -notlike 'eyJ*') { return }
   if (-not $maxHoras) { $maxHoras = 12 }
+  # Mesmo token do agente, se existir (arquivo fora do git); senao a chave publica.
+  $arqToken = Join-Path $PASTA 'supabase-token.txt'
+  $token    = if (Test-Path $arqToken) { (Get-Content $arqToken -Raw).Trim() } else { $chave }
 
   # Mesma janela do agente: nota mais velha que isso ele abandona de propósito
   # (protege contra despejar dias acumulados ao ligar o PC). Alarmar por ela
@@ -342,7 +345,7 @@ function VigiarFila {
     $req.Timeout = $PRAZO_HTTP_MS
     $req.ReadWriteTimeout = $PRAZO_HTTP_MS
     $req.Headers.Add('apikey', $chave)
-    $req.Headers.Add('Authorization', "Bearer $chave")
+    $req.Headers.Add('Authorization', "Bearer $token")
     $resp = $req.GetResponse()
     try {
       $sr = New-Object IO.StreamReader($resp.GetResponseStream())
