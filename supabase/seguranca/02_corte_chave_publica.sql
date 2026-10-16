@@ -100,10 +100,12 @@ alter table public.notifications enable row level security;
 create policy painel_tudo on public.notifications
   for all to authenticated using (true) with check (true);
 
+-- Só as NÃO LIDAS: é o que o app busca (consumeNotifications). Sem isso a
+-- chave pública leria as ~6 mil notificações antigas de todos os motoristas.
 create policy app_motorista_le on public.notifications
-  for select to anon using (recipient_id like 'd-%');
+  for select to anon using (recipient_id like 'd-%' and read = false);
 create policy app_motorista_marca_lida on public.notifications
-  for update to anon using (recipient_id like 'd-%') with check (recipient_id like 'd-%');
+  for update to anon using (recipient_id like 'd-%' and read = false) with check (recipient_id like 'd-%');
 create policy app_motorista_avisa on public.notifications
   for insert to anon with check (true);
 
