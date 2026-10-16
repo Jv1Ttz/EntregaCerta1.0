@@ -321,7 +321,8 @@ function VigiarFila {
   if (-not $maxHoras) { $maxHoras = 12 }
   # Mesmo token do agente, se existir (arquivo fora do git); senao a chave publica.
   $arqToken = Join-Path $PASTA 'supabase-token.txt'
-  $token    = if (Test-Path $arqToken) { (Get-Content $arqToken -Raw).Trim() } else { $chave }
+  $token    = if (Test-Path $arqToken) { "$(Get-Content $arqToken -Raw)".Trim() } else { '' }
+  if ($token -notlike 'eyJ*') { $token = $chave }   # vazio ou corrompido: chave publica
 
   # Mesma janela do agente: nota mais velha que isso ele abandona de propósito
   # (protege contra despejar dias acumulados ao ligar o PC). Alarmar por ela

@@ -95,7 +95,8 @@ $ARQ_TOKEN    = Join-Path $PASTA "supabase-token.txt"
 # Token proprio do agente (papel agente_impressao: so le a view da etiqueta).
 # Fica num arquivo FORA deste script porque o script vive no git. Sem o arquivo,
 # usa a chave publica, como sempre foi: assim a troca nao depende de ordem.
-$SUPABASE_TOKEN = if (Test-Path $ARQ_TOKEN) { (Get-Content $ARQ_TOKEN -Raw).Trim() } else { $SUPABASE_KEY }
+$SUPABASE_TOKEN = if (Test-Path $ARQ_TOKEN) { "$(Get-Content $ARQ_TOKEN -Raw)".Trim() } else { "" }
+if ($SUPABASE_TOKEN -notlike 'eyJ*') { $SUPABASE_TOKEN = $SUPABASE_KEY }   # vazio ou corrompido: chave publica
 $ARQ_IMPRESSAS = Join-Path $PASTA "impressas.txt"   # memória: DANFEs que já saíram
 # Etiqueta tem memória PRÓPRIA de propósito. Se as duas compartilhassem o mesmo
 # controle, uma falha só (impressora de etiqueta offline, por exemplo) faria o
