@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
-import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado, ultimoUsuario } from '../services/sessao';
+import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado } from '../services/sessao';
 import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
@@ -81,8 +81,7 @@ const formatCurrency = (value?: number) => {
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [authenticated, setAuthenticated] = useState(() => sessaoValida('vendedor'));
   const [passwordInput, setPasswordInput] = useState('');
-  const [usuarioInput, setUsuarioInput] = useState(ultimoUsuario);
-  const [manterConectado, setManterConectado] = useState(true);
+  const [usuarioInput, setUsuarioInput] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
   // 'criar' = conta nova (ou zerada pelo admin): a senha digitada vira a dele.
   const [etapa, setEtapa] = useState<'login' | 'criar'>('login');
@@ -377,7 +376,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
         return;
       }
 
-      const erro = await entrarVendedor(usuario, passwordInput, manterConectado);
+      const erro = await entrarVendedor(usuario, passwordInput);
       if (erro) { setLoginErro(erro); if (etapa === 'login') setPasswordInput(''); }
       else setAuthenticated(true);
     } finally {
@@ -406,6 +405,8 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                 value={usuarioInput}
                 onChange={e => { setUsuarioInput(e.target.value); setLoginErro(null); setEtapa('login'); }}
                 placeholder="ex.: reinaldo"
+                name="username"
+                id="ec-vendedor-usuario"
                 autoFocus
                 autoCapitalize="none"
                 autoComplete="username"
@@ -430,6 +431,8 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   value={passwordInput}
                   onChange={e => { setPasswordInput(e.target.value); setLoginErro(null); }}
                   placeholder={etapa === 'criar' ? 'Crie sua senha' : 'Digite a senha'}
+                  name={etapa === 'criar' ? 'new-password' : 'password'}
+                  id="ec-vendedor-senha"
                   autoComplete={etapa === 'criar' ? 'new-password' : 'current-password'}
                   className={`w-full px-3 py-2.5 pr-10 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
                     ${loginErro
@@ -454,6 +457,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   type={showPassword ? 'text' : 'password'}
                   value={confirmInput}
                   onChange={e => { setConfirmInput(e.target.value); setLoginErro(null); }}
+                  name="confirm-password"
                   autoComplete="new-password"
                   className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
                     ${loginErro
@@ -461,12 +465,6 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                       : 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-emerald-500'}`}
                 />
               </div>
-            )}
-            {usuarioInput.trim() && (
-              <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 select-none">
-                <input type="checkbox" checked={manterConectado} onChange={e => setManterConectado(e.target.checked)} />
-                Manter conectado neste navegador (desmarque em computador compartilhado)
-              </label>
             )}
             {loginErro && (
               <p className="text-xs text-red-500 flex items-center gap-1">

@@ -146,21 +146,6 @@ export async function entrar(perfil: Perfil, senha: string): Promise<boolean> {
 // supabase/seguranca/03_contas_vendedores.sql). Conta nova, ou zerada pelo
 // admin, ainda não tem senha: a primeira que o vendedor digitar vira a dele.
 
-// O último usuário que entrou com "manter conectado" fica lembrado para vir
-// preenchido no próximo login. Só o usuário — senha nunca.
-const CHAVE_USUARIO = 'ec-vendedor-usuario';
-
-export function ultimoUsuario(): string {
-  try { return localStorage.getItem(CHAVE_USUARIO) || ''; } catch { return ''; }
-}
-
-function lembrarUsuario(usuario: string | null) {
-  try {
-    if (usuario) localStorage.setItem(CHAVE_USUARIO, usuario.trim().toLowerCase());
-    else localStorage.removeItem(CHAVE_USUARIO);
-  } catch { }
-}
-
 export type StatusVendedor = 'primeiro_acesso' | 'ativa' | 'inexistente';
 
 /** Pergunta antes do login se a conta espera a primeira senha. null = sem rede. */
@@ -178,9 +163,12 @@ export async function statusVendedor(usuario: string): Promise<StatusVendedor | 
  * Entra como vendedor — ou, se a conta ainda não tem senha, cria a senha e
  * entra. Devolve null se deu certo, ou a mensagem para mostrar na tela.
  */
-export async function entrarVendedor(usuario: string, senha: string, manterConectado = true): Promise<string | null> {
+// Lembrar usuário e senha fica com o gerenciador de senhas do navegador (os
+// campos do login estão marcados para ele). A sessão em si dura até fechar o
+// navegador; o servidor ainda aceita `lembrar` (token de 30 dias), sem uso hoje.
+export async function entrarVendedor(usuario: string, senha: string): Promise<string | null> {
   try {
-    const res = await chamarLogin('login_vendedor', { usuario, senha, lembrar: manterConectado });
+    const res = await chamarLogin('login_vendedor', { usuario, senha });
     if (res.status === 401) return 'Usuário ou senha incorretos.';
     if (!res.ok) {
       // 400 = senha nova fraca demais; o servidor diz o porquê.
@@ -188,9 +176,7 @@ export async function entrarVendedor(usuario: string, senha: string, manterConec
       return corpo?.message || 'Não foi possível entrar. Tente de novo.';
     }
     const { token } = await res.json();
-    if (!guardarToken('vendedor', token, manterConectado)) return 'Não foi possível entrar. Tente de novo.';
-    lembrarUsuario(manterConectado ? usuario : null);
-    return null;
+    return guardarToken('vendedor', token, false) ? null : 'Não foi possível entrar. Tente de novo.';
   } catch {
     return 'Sem conexão com o servidor.';
   }
