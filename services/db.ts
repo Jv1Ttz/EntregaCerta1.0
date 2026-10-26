@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient';
-import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType, Route } from '../types';
+import { Driver, Invoice, DeliveryStatus, DeliveryProof, ProofSummary, Vehicle, AppNotification, ActivityLog, ActivityLogEventType, Route, ContaVendedor } from '../types';
 import { REASON_LABEL } from '../constants/returnReasons';
 
 /** Bucket privado das imagens de comprovante (foto, canhoto, assinatura). */
@@ -1391,6 +1391,42 @@ assignLogistics: async (invoiceId: string, driverId: string | null, vehicleId: s
   // é o servidor (login_painel), chamado por services/sessao.ts. O antigo
   // verifyAdminPassword devolvia true/false para o navegador decidir — e tinha
   // uma "senha reserva" (VITE_ADMIN_PASSWORD) que ia embutida no .js publicado.
+
+  // ── Contas de vendedor (aba Vendedores do Administrador) ───────────────────
+  // Todas exigem token de admin, conferido no servidor (04_admin_vendedores.sql).
+
+  listarVendedores: async (): Promise<ContaVendedor[]> => {
+    const { data, error } = await supabase.rpc('vendedor_listar');
+    if (error) throw error;
+    return (data ?? []) as ContaVendedor[];
+  },
+
+  salvarVendedor: async (c: { usuario: string; nome: string; ve_tudo: boolean; nomes_nf: string[] }) => {
+    const { error } = await supabase.rpc('vendedor_salvar', c);
+    if (error) throw error;
+  },
+
+  ativarVendedor: async (usuario: string, ativo: boolean) => {
+    const { error } = await supabase.rpc('vendedor_ativar', { usuario, ativo });
+    if (error) throw error;
+  },
+
+  zerarSenhaVendedor: async (usuario: string) => {
+    const { error } = await supabase.rpc('vendedor_zerar_senha', { usuario });
+    if (error) throw error;
+  },
+
+  /** Nomes de vendedor como o ERP escreve nas notas — sugestões do cadastro. */
+  nomesDeVendedorNasNotas: async (): Promise<string[]> => {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('vendedor')
+      .not('vendedor', 'is', null)
+      .is('deleted_at', null)
+      .limit(10000);
+    if (error) return [];
+    return [...new Set((data ?? []).map(r => String(r.vendedor).trim().toUpperCase()).filter(Boolean))].sort();
+  },
 
   updateAdminPassword: async (newPassword: string) => {
     alert("Configuração de senha deve ser feita via Variáveis de Ambiente no Supabase/Vercel.");

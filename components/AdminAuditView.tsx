@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { db } from '../services/db';
 import type { Invoice, ActivityLog, ActivityLogEventType, ProofSummary, Driver, Vehicle } from '../types';
 import { REASON_LABEL } from '../constants/returnReasons';
-import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw, TrendingDown, Download } from 'lucide-react';
+import { Trash2, AlertCircle, ClipboardList, Filter, X, Loader2, Search, RotateCcw, TrendingDown, Download, Users } from 'lucide-react';
+import { VendedoresTab } from './VendedoresTab';
 
 // ─── Configuração dos tipos de evento ───────────────────────────────────────
 
@@ -854,7 +855,7 @@ const ActivityLogsTab: React.FC = () => {
 // ─── Componente Principal ────────────────────────────────────────────────────
 
 export const AdminAuditView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'deleted' | 'logs' | 'devolucoes'>('logs');
+  const [activeTab, setActiveTab] = useState<'deleted' | 'logs' | 'devolucoes' | 'vendedores'>('logs');
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 p-4 md:p-6">
@@ -865,7 +866,7 @@ export const AdminAuditView: React.FC = () => {
             Administrador
           </h1>
           <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400">
-            Auditoria do sistema — logs de atividade, devoluções e notas excluídas.
+            Auditoria do sistema — logs de atividade, devoluções, notas excluídas e contas de vendedor.
           </p>
         </header>
 
@@ -902,11 +903,23 @@ export const AdminAuditView: React.FC = () => {
             <TrendingDown size={15} />
             Devoluções
           </button>
+          <button
+            onClick={() => setActiveTab('vendedores')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${
+              activeTab === 'vendedores'
+                ? 'bg-emerald-600 text-white shadow'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+            }`}
+          >
+            <Users size={15} />
+            Vendedores
+          </button>
         </div>
 
         {activeTab === 'logs' && <ActivityLogsTab />}
         {activeTab === 'deleted' && <DeletedInvoicesTab />}
         {activeTab === 'devolucoes' && <DevolucoesTab />}
+        {activeTab === 'vendedores' && <VendedoresTab />}
       </div>
     </div>
   );

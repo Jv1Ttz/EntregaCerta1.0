@@ -224,3 +224,19 @@ export type ViewState =
   | { type: 'DRIVER_LIST'; driverId: string }
   | { type: 'DRIVER_ACTION'; driverId: string; invoiceId: string }
   | { type: 'SELLER_VIEW' };
+
+/**
+ * Conta de vendedor, como a tela do Administrador vê (vendedor_listar).
+ * Sem hash de senha — só se a conta já tem senha. `notas` é quantas notas a
+ * conta enxerga hoje: 0 costuma indicar nome digitado diferente do da NF.
+ */
+export interface ContaVendedor {
+  usuario: string;
+  nome: string;
+  ve_tudo: boolean;
+  nomes_nf: string[];
+  ativo: boolean;
+  tem_senha: boolean;
+  senha_definida_em: string | null;
+  notas: number;
+}
