@@ -23,15 +23,17 @@ const CHAVE: Record<Perfil, string> = {
 };
 
 /**
- * Onde cada token mora. Gestor e admin em localStorage (sobrevive ao F5 e a
- * fechar o navegador, até expirar em 12h — era o comportamento da sessão
- * antiga). Vendedor em sessionStorage: a tela de balcão mostra notas, CNPJs e
- * documentos de recebedor atrás de uma senha compartilhada pela equipe, então
- * fechar o navegador encerra a sessão e ninguém herda a de quem usou antes.
+ * Onde cada token pode morar. Gestor e admin em localStorage (sobrevive ao F5 e
+ * a fechar o navegador, até expirar em 12h). Vendedor em um dos dois: com
+ * "manter conectado" vai para localStorage (token de 30 dias, a conta é dele);
+ * sem, fica em sessionStorage e some ao fechar o navegador — para computador
+ * compartilhado.
  */
-function armazem(perfil: Perfil): Storage | null {
-  try { return perfil === 'vendedor' ? sessionStorage : localStorage; }
-  catch { return null; }
+function armazens(perfil: Perfil): Storage[] {
+  const lista: Storage[] = [];
+  try { lista.push(localStorage); } catch { }
+  if (perfil === 'vendedor') { try { lista.push(sessionStorage); } catch { } }
+  return lista;
 }
 
 /** Instante de expiração lido do próprio token — a fonte da verdade é ele. */
@@ -45,15 +47,15 @@ function expiraEm(token: string): number {
 }
 
 export function tokenDe(perfil: Perfil): string | null {
-  const a = armazem(perfil);
-  if (!a) return null;
-  try {
-    const t = a.getItem(CHAVE[perfil]);
-    // Folga de 1 minuto: melhor pedir senha um pouco antes do que mandar um
-    // token que o servidor vai recusar no meio de uma operação.
-    if (t && Date.now() < expiraEm(t) - 60_000) return t;
-    if (t) a.removeItem(CHAVE[perfil]);
-  } catch { /* storage bloqueado: sem sessão, cai no login */ }
+  for (const a of armazens(perfil)) {
+    try {
+      const t = a.getItem(CHAVE[perfil]);
+      // Folga de 1 minuto: melhor pedir senha um pouco antes do que mandar um
+      // token que o servidor vai recusar no meio de uma operação.
+      if (t && Date.now() < expiraEm(t) - 60_000) return t;
+      if (t) a.removeItem(CHAVE[perfil]);
+    } catch { /* storage bloqueado: sem sessão, cai no login */ }
+  }
   return null;
 }
 
@@ -62,7 +64,7 @@ export function sessaoValida(perfil: Perfil): boolean {
 }
 
 export function encerrarSessao(perfil: Perfil) {
-  try { armazem(perfil)?.removeItem(CHAVE[perfil]); } catch { }
+  for (const a of armazens(perfil)) { try { a.removeItem(CHAVE[perfil]); } catch { } }
 }
 
 // ── Perfil em uso ────────────────────────────────────────────────────────────
@@ -106,9 +108,17 @@ async function chamarLogin(funcao: string, corpo: object): Promise<Response> {
   });
 }
 
-function guardarToken(perfil: Perfil, token: unknown): boolean {
+/**
+ * Grava o token. `duradouro` = localStorage (sobrevive a fechar o navegador);
+ * senão sessionStorage, quando o perfil permite. Limpa o outro lugar antes, para
+ * nunca sobrar um token velho competindo com o novo.
+ */
+function guardarToken(perfil: Perfil, token: unknown, duradouro = true): boolean {
   if (typeof token !== 'string' || expiraEm(token) <= Date.now()) return false;
-  armazem(perfil)?.setItem(CHAVE[perfil], token);
+  encerrarSessao(perfil);
+  const [local, sessao] = armazens(perfil);
+  try { ((duradouro || !sessao) ? local : sessao)?.setItem(CHAVE[perfil], token); }
+  catch { return false; }
   return true;
 }
 
@@ -136,6 +146,21 @@ export async function entrar(perfil: Perfil, senha: string): Promise<boolean> {
 // supabase/seguranca/03_contas_vendedores.sql). Conta nova, ou zerada pelo
 // admin, ainda não tem senha: a primeira que o vendedor digitar vira a dele.
 
+// O último usuário que entrou com "manter conectado" fica lembrado para vir
+// preenchido no próximo login. Só o usuário — senha nunca.
+const CHAVE_USUARIO = 'ec-vendedor-usuario';
+
+export function ultimoUsuario(): string {
+  try { return localStorage.getItem(CHAVE_USUARIO) || ''; } catch { return ''; }
+}
+
+function lembrarUsuario(usuario: string | null) {
+  try {
+    if (usuario) localStorage.setItem(CHAVE_USUARIO, usuario.trim().toLowerCase());
+    else localStorage.removeItem(CHAVE_USUARIO);
+  } catch { }
+}
+
 export type StatusVendedor = 'primeiro_acesso' | 'ativa' | 'inexistente';
 
 /** Pergunta antes do login se a conta espera a primeira senha. null = sem rede. */
@@ -153,9 +178,9 @@ export async function statusVendedor(usuario: string): Promise<StatusVendedor | 
  * Entra como vendedor — ou, se a conta ainda não tem senha, cria a senha e
  * entra. Devolve null se deu certo, ou a mensagem para mostrar na tela.
  */
-export async function entrarVendedor(usuario: string, senha: string): Promise<string | null> {
+export async function entrarVendedor(usuario: string, senha: string, manterConectado = true): Promise<string | null> {
   try {
-    const res = await chamarLogin('login_vendedor', { usuario, senha });
+    const res = await chamarLogin('login_vendedor', { usuario, senha, lembrar: manterConectado });
     if (res.status === 401) return 'Usuário ou senha incorretos.';
     if (!res.ok) {
       // 400 = senha nova fraca demais; o servidor diz o porquê.
@@ -163,7 +188,9 @@ export async function entrarVendedor(usuario: string, senha: string): Promise<st
       return corpo?.message || 'Não foi possível entrar. Tente de novo.';
     }
     const { token } = await res.json();
-    return guardarToken('vendedor', token) ? null : 'Não foi possível entrar. Tente de novo.';
+    if (!guardarToken('vendedor', token, manterConectado)) return 'Não foi possível entrar. Tente de novo.';
+    lembrarUsuario(manterConectado ? usuario : null);
+    return null;
   } catch {
     return 'Sem conexão com o servidor.';
   }

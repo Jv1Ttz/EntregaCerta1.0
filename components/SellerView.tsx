@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
-import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado } from '../services/sessao';
+import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado, ultimoUsuario } from '../services/sessao';
 import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
@@ -81,7 +81,8 @@ const formatCurrency = (value?: number) => {
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [authenticated, setAuthenticated] = useState(() => sessaoValida('vendedor'));
   const [passwordInput, setPasswordInput] = useState('');
-  const [usuarioInput, setUsuarioInput] = useState('');
+  const [usuarioInput, setUsuarioInput] = useState(ultimoUsuario);
+  const [manterConectado, setManterConectado] = useState(true);
   const [confirmInput, setConfirmInput] = useState('');
   // 'criar' = conta nova (ou zerada pelo admin): a senha digitada vira a dele.
   const [etapa, setEtapa] = useState<'login' | 'criar'>('login');
@@ -376,7 +377,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
         return;
       }
 
-      const erro = await entrarVendedor(usuario, passwordInput);
+      const erro = await entrarVendedor(usuario, passwordInput, manterConectado);
       if (erro) { setLoginErro(erro); if (etapa === 'login') setPasswordInput(''); }
       else setAuthenticated(true);
     } finally {
@@ -461,6 +462,12 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                 />
               </div>
             )}
+            {usuarioInput.trim() && (
+              <label className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 select-none">
+                <input type="checkbox" checked={manterConectado} onChange={e => setManterConectado(e.target.checked)} />
+                Manter conectado neste navegador (desmarque em computador compartilhado)
+              </label>
+            )}
             {loginErro && (
               <p className="text-xs text-red-500 flex items-center gap-1">
                 <AlertTriangle size={12} /> {loginErro}
@@ -532,11 +539,11 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
       {/* Header */}
       <div className="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
-          {/* Sair daqui encerra a sessão. Sem isto, quem voltasse à tela inicial
-              e clicasse em Vendedor de novo entraria direto — e num computador
-              compartilhado a pessoa seguinte herdaria o acesso. */}
+          {/* Voltar só volta: com conta individual a sessão é do vendedor, e
+              encerrar aqui obrigava a entrar de novo toda vez. Sair é o botão
+              próprio, à direita. */}
           <button
-            onClick={() => { encerrarSessao('vendedor'); onBack(); }}
+            onClick={onBack}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <ChevronLeft size={20} />
@@ -551,6 +558,13 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                 <p className="text-xs text-slate-400">{logado.nome}{logado.veTudo ? ' · todas as notas' : ''}</p>
               )}
             </div>
+            <button
+              onClick={() => { encerrarSessao('vendedor'); onBack(); }}
+              title="Encerrar a sessão neste navegador"
+              className="ml-2 px-2 py-1 rounded-md text-xs font-medium text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+            >
+              Sair
+            </button>
           </div>
 
           {/* Abas */}
