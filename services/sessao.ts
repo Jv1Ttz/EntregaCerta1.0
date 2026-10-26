@@ -90,6 +90,28 @@ export function avisarSessaoRecusada() {
   window.dispatchEvent(new CustomEvent(EVENTO_SESSAO_EXPIRADA, { detail: perfilEmUso }));
 }
 
+// ── Chamada às funções de login do servidor ─────────────────────────────────
+// Vai com a chave pública, sem token de painel: quem chama ainda não entrou.
+async function chamarLogin(funcao: string, corpo: object): Promise<Response> {
+  const url = import.meta.env.VITE_SUPABASE_URL;
+  const chavePublica = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return fetch(`${url}/rest/v1/rpc/${funcao}`, {
+    method: 'POST',
+    headers: {
+      apikey: chavePublica,
+      Authorization: `Bearer ${chavePublica}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(corpo),
+  });
+}
+
+function guardarToken(perfil: Perfil, token: unknown): boolean {
+  if (typeof token !== 'string' || expiraEm(token) <= Date.now()) return false;
+  armazem(perfil)?.setItem(CHAVE[perfil], token);
+  return true;
+}
+
 // ── Login ────────────────────────────────────────────────────────────────────
 /**
  * Pede o token ao servidor. Devolve true se entrou. Senha errada é 401 e não
@@ -98,25 +120,66 @@ export function avisarSessaoRecusada() {
  */
 export async function entrar(perfil: Perfil, senha: string): Promise<boolean> {
   if (!senha) return false;
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const chavePublica = import.meta.env.VITE_SUPABASE_ANON_KEY;
   try {
-    const res = await fetch(`${url}/rest/v1/rpc/login_painel`, {
-      method: 'POST',
-      headers: {
-        apikey: chavePublica,
-        Authorization: `Bearer ${chavePublica}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ perfil, senha }),
-    });
+    const res = await chamarLogin('login_painel', { perfil, senha });
     if (!res.ok) return false;
     const { token } = await res.json();
-    if (typeof token !== 'string' || expiraEm(token) <= Date.now()) return false;
-    armazem(perfil)?.setItem(CHAVE[perfil], token);
-    return true;
+    return guardarToken(perfil, token);
   } catch (e) {
     console.error('Login indisponível:', e);
     return false;
+  }
+}
+
+// ── Vendedor com conta própria ──────────────────────────────────────────────
+// Cada vendedor tem usuário e senha, e o BANCO só devolve as notas dele (ver
+// supabase/seguranca/03_contas_vendedores.sql). Conta nova, ou zerada pelo
+// admin, ainda não tem senha: a primeira que o vendedor digitar vira a dele.
+
+export type StatusVendedor = 'primeiro_acesso' | 'ativa' | 'inexistente';
+
+/** Pergunta antes do login se a conta espera a primeira senha. null = sem rede. */
+export async function statusVendedor(usuario: string): Promise<StatusVendedor | null> {
+  try {
+    const res = await chamarLogin('vendedor_status', { usuario });
+    if (!res.ok) return null;
+    return (await res.json()) as StatusVendedor;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Entra como vendedor — ou, se a conta ainda não tem senha, cria a senha e
+ * entra. Devolve null se deu certo, ou a mensagem para mostrar na tela.
+ */
+export async function entrarVendedor(usuario: string, senha: string): Promise<string | null> {
+  try {
+    const res = await chamarLogin('login_vendedor', { usuario, senha });
+    if (res.status === 401) return 'Usuário ou senha incorretos.';
+    if (!res.ok) {
+      // 400 = senha nova fraca demais; o servidor diz o porquê.
+      const corpo = await res.json().catch(() => ({}));
+      return corpo?.message || 'Não foi possível entrar. Tente de novo.';
+    }
+    const { token } = await res.json();
+    return guardarToken('vendedor', token) ? null : 'Não foi possível entrar. Tente de novo.';
+  } catch {
+    return 'Sem conexão com o servidor.';
+  }
+}
+
+/**
+ * Quem está logado na tela do vendedor, lido do próprio token. Sem usuário =
+ * senha compartilhada antiga (vê tudo, só durante a transição).
+ */
+export function vendedorLogado(): { usuario: string | null; nome: string | null; veTudo: boolean } | null {
+  const t = tokenDe('vendedor');
+  if (!t) return null;
+  try {
+    const c = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return { usuario: c.usuario ?? null, nome: c.nome ?? null, veTudo: c.usuario ? Boolean(c.ve_tudo) : true };
+  } catch {
+    return null;
   }
 }

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
-import { sessaoValida, entrar, encerrarSessao } from '../services/sessao';
+import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado } from '../services/sessao';
 import { geocodeInvoice } from '../services/geocode';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
@@ -74,13 +74,18 @@ const formatCurrency = (value?: number) => {
 };
 
 // Sessão do vendedor: token emitido pelo servidor, guardado em sessionStorage
-// (some ao fechar o navegador — tela de balcão, senha compartilhada pela equipe).
-// Detalhes em services/sessao.ts.
+// (some ao fechar o navegador). Cada vendedor entra com usuário e senha próprios
+// e o banco só devolve as notas dele; o usuário em branco ainda aceita a senha
+// compartilhada antiga, durante a transição. Detalhes em services/sessao.ts.
 
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [authenticated, setAuthenticated] = useState(() => sessaoValida('vendedor'));
   const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState(false);
+  const [usuarioInput, setUsuarioInput] = useState('');
+  const [confirmInput, setConfirmInput] = useState('');
+  // 'criar' = conta nova (ou zerada pelo admin): a senha digitada vira a dele.
+  const [etapa, setEtapa] = useState<'login' | 'criar'>('login');
+  const [loginErro, setLoginErro] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'notas' | 'frota'>('notas');
@@ -275,6 +280,17 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const driverMap = useMemo(() => Object.fromEntries(drivers.map(d => [d.id, d.name])), [drivers]);
   const vehicleMap = useMemo(() => Object.fromEntries(vehicles.map(v => [v.id, `${v.plate} — ${v.model}`])), [vehicles]);
 
+  // Frota do vendedor: quem vê tudo vê a frota toda; os demais, só os veículos
+  // que estão EM ROTA levando nota deles. O servidor já recorta os veículos que
+  // um dia levaram nota dele (para a placa aparecer no histórico); aqui sobra
+  // o "agora".
+  const logado = useMemo(() => vendedorLogado(), [authenticated]);
+  const frotaVisivel = useMemo(() => {
+    if (!logado || logado.veTudo) return vehicles;
+    const emRota = new Set(invoices.filter(i => i.status === 'IN_PROGRESS' && i.vehicle_id).map(i => i.vehicle_id));
+    return vehicles.filter(v => emRota.has(v.id));
+  }, [vehicles, invoices, logado]);
+
   const filtered = useMemo(() => {
     return invoices.filter(inv => {
       const searchLower = searchTerm.toLowerCase();
@@ -335,20 +351,34 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
+    setLoginErro(null);
     try {
-      // Quem confere é o servidor, e ele só devolve o token se a senha bate.
-      // Antes a Edge Function respondia {valid:true/false} e esta tela decidia
-      // sozinha — adulterar a resposta abria a lista inteira de notas.
-      if (await entrar('vendedor', passwordInput)) {
-        setAuthenticated(true);
-        setPasswordError(false);
-      } else {
-        setPasswordError(true);
-        setPasswordInput('');
+      const usuario = usuarioInput.trim().toLowerCase();
+
+      // Sem usuário: senha compartilhada antiga — só durante a transição.
+      if (!usuario) {
+        if (await entrar('vendedor', passwordInput)) setAuthenticated(true);
+        else { setLoginErro('Senha incorreta.'); setPasswordInput(''); }
+        return;
       }
-    } catch {
-      setPasswordError(true);
-      setPasswordInput('');
+
+      if (etapa === 'login') {
+        const status = await statusVendedor(usuario);
+        if (status === null) { setLoginErro('Sem conexão com o servidor.'); return; }
+        if (status === 'inexistente') { setLoginErro('Usuário não encontrado ou desativado.'); return; }
+        if (status === 'primeiro_acesso') {
+          // Conta sem senha: pede a senha nova duas vezes antes de gravar.
+          setEtapa('criar'); setPasswordInput(''); setConfirmInput('');
+          return;
+        }
+      } else if (passwordInput !== confirmInput) {
+        setLoginErro('As duas senhas não são iguais.');
+        return;
+      }
+
+      const erro = await entrarVendedor(usuario, passwordInput);
+      if (erro) { setLoginErro(erro); if (etapa === 'login') setPasswordInput(''); }
+      else setAuthenticated(true);
     } finally {
       setLoginLoading(false);
     }
@@ -368,17 +398,40 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
           <form onSubmit={handleLogin} className="p-6 space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1.5">
-                Senha de acesso
+                Usuário
+              </label>
+              <input
+                type="text"
+                value={usuarioInput}
+                onChange={e => { setUsuarioInput(e.target.value); setLoginErro(null); setEtapa('login'); }}
+                placeholder="ex.: reinaldo"
+                autoFocus
+                autoCapitalize="none"
+                autoComplete="username"
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
+                    ${loginErro
+                      ? 'border-red-400 focus:ring-2 focus:ring-red-300'
+                      : 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-emerald-500'}`}
+              />
+            </div>
+            {etapa === 'criar' && (
+              <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg p-2.5">
+                Primeiro acesso: crie sua senha (mínimo de 8 caracteres). Só você vai saber.
+              </p>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1.5">
+                {etapa === 'criar' ? 'Nova senha' : 'Senha'}
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={passwordInput}
-                  onChange={e => { setPasswordInput(e.target.value); setPasswordError(false); }}
-                  placeholder="Digite a senha"
-                  autoFocus
+                  onChange={e => { setPasswordInput(e.target.value); setLoginErro(null); }}
+                  placeholder={etapa === 'criar' ? 'Crie sua senha' : 'Digite a senha'}
+                  autoComplete={etapa === 'criar' ? 'new-password' : 'current-password'}
                   className={`w-full px-3 py-2.5 pr-10 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
-                    ${passwordError
+                    ${loginErro
                       ? 'border-red-400 focus:ring-2 focus:ring-red-300'
                       : 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-emerald-500'}`}
                 />
@@ -390,18 +443,35 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              {passwordError && (
-                <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
-                  <AlertTriangle size={12} /> Senha incorreta.
-                </p>
-              )}
             </div>
+            {etapa === 'criar' && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1.5">
+                  Repita a senha
+                </label>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={confirmInput}
+                  onChange={e => { setConfirmInput(e.target.value); setLoginErro(null); }}
+                  autoComplete="new-password"
+                  className={`w-full px-3 py-2.5 border rounded-lg text-sm outline-none transition-colors bg-white dark:bg-slate-700 text-slate-900 dark:text-white
+                    ${loginErro
+                      ? 'border-red-400 focus:ring-2 focus:ring-red-300'
+                      : 'border-slate-300 dark:border-slate-600 focus:ring-2 focus:ring-emerald-500'}`}
+                />
+              </div>
+            )}
+            {loginErro && (
+              <p className="text-xs text-red-500 flex items-center gap-1">
+                <AlertTriangle size={12} /> {loginErro}
+              </p>
+            )}
             <button
               type="submit"
               disabled={loginLoading}
               className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold rounded-lg text-sm transition-colors flex items-center justify-center gap-2"
             >
-              {loginLoading ? <><Loader2 size={16} className="animate-spin" /> Verificando...</> : 'Entrar'}
+              {loginLoading ? <><Loader2 size={16} className="animate-spin" /> Verificando...</> : (etapa === 'criar' ? 'Criar senha e entrar' : 'Entrar')}
             </button>
             <button
               type="button"
@@ -477,6 +547,9 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-800 dark:text-white leading-tight">Visão do Vendedor</h1>
+              {logado?.nome && (
+                <p className="text-xs text-slate-400">{logado.nome}{logado.veTudo ? ' · todas as notas' : ''}</p>
+              )}
             </div>
           </div>
 
@@ -541,7 +614,10 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
               </p>
             </div>
             <div className="p-2 space-y-2">
-              {vehicles.map(v => {
+              {frotaVisivel.length === 0 && (
+                <p className="text-sm text-slate-400 p-3">Nenhum veículo em rota com nota sua agora.</p>
+              )}
+              {frotaVisivel.map(v => {
                 const hasLocation = !!v.last_location;
                 const lastUpdate = hasLocation ? new Date(v.last_location!.updated_at) : null;
                 const isOnline = lastUpdate && (new Date().getTime() - lastUpdate.getTime() < 5 * 60 * 1000);
@@ -679,7 +755,7 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
             >
               <NavigationControl position="bottom-right" />
               {/* Marcadores de veículos */}
-              {vehicles.map(v => {
+              {frotaVisivel.map(v => {
                 if (!v.last_location) return null;
                 const isOnline = (new Date().getTime() - new Date(v.last_location.updated_at).getTime()) < 5 * 60 * 1000;
                 const isSelected = selectedVehicleId === v.id;
