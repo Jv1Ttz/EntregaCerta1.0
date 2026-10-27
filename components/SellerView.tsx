@@ -73,8 +73,8 @@ const formatCurrency = (value?: number) => {
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 };
 
-// Sessão do vendedor: token emitido pelo servidor, guardado em sessionStorage
-// (some ao fechar o navegador). Cada vendedor entra com usuário e senha próprios
+// Sessão do vendedor: token de 30 dias emitido pelo servidor, guardado em
+// localStorage (vale para todas as abas). Cada vendedor entra com usuário e senha próprios
 // e o banco só devolve as notas dele; o usuário em branco ainda aceita a senha
 // compartilhada antiga, durante a transição. Detalhes em services/sessao.ts.
 

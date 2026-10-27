@@ -24,10 +24,9 @@ const CHAVE: Record<Perfil, string> = {
 
 /**
  * Onde cada token pode morar. Gestor e admin em localStorage (sobrevive ao F5 e
- * a fechar o navegador, até expirar em 12h). Vendedor em um dos dois: com
- * "manter conectado" vai para localStorage (token de 30 dias, a conta é dele);
- * sem, fica em sessionStorage e some ao fechar o navegador — para computador
- * compartilhado.
+ * a fechar o navegador, até expirar em 12h). Vendedor também em localStorage
+ * (token de 30 dias); sessionStorage segue na lista só para limpar token de
+ * versão anterior, que guardava lá.
  */
 function armazens(perfil: Perfil): Storage[] {
   const lista: Storage[] = [];
@@ -163,12 +162,13 @@ export async function statusVendedor(usuario: string): Promise<StatusVendedor | 
  * Entra como vendedor — ou, se a conta ainda não tem senha, cria a senha e
  * entra. Devolve null se deu certo, ou a mensagem para mostrar na tela.
  */
-// Lembrar usuário e senha fica com o gerenciador de senhas do navegador (os
-// campos do login estão marcados para ele). A sessão em si dura até fechar o
-// navegador; o servidor ainda aceita `lembrar` (token de 30 dias), sem uso hoje.
+// Sessão de 30 dias em localStorage: o vendedor chega pelo link de outra
+// aplicação, que abre aba nova a cada nota — com sessionStorage (só da aba) era
+// login toda vez. Continua revogável no servidor: desativar ou zerar a senha no
+// Admin derruba na hora (ver 05_vendedor_manter_conectado.sql); Sair apaga.
 export async function entrarVendedor(usuario: string, senha: string): Promise<string | null> {
   try {
-    const res = await chamarLogin('login_vendedor', { usuario, senha });
+    const res = await chamarLogin('login_vendedor', { usuario, senha, lembrar: true });
     if (res.status === 401) return 'Usuário ou senha incorretos.';
     if (!res.ok) {
       // 400 = senha nova fraca demais; o servidor diz o porquê.
@@ -176,7 +176,7 @@ export async function entrarVendedor(usuario: string, senha: string): Promise<st
       return corpo?.message || 'Não foi possível entrar. Tente de novo.';
     }
     const { token } = await res.json();
-    return guardarToken('vendedor', token, false) ? null : 'Não foi possível entrar. Tente de novo.';
+    return guardarToken('vendedor', token) ? null : 'Não foi possível entrar. Tente de novo.';
   } catch {
     return 'Sem conexão com o servidor.';
   }
