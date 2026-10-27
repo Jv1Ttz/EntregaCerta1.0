@@ -106,7 +106,13 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
 
   // ── filtros ────────────────────────────────────────────────────────────────
-  const [searchTerm, setSearchTerm] = useState('');
+  // Link direto (#vendedor?nf=37318 ou ?busca=...) já abre com a busca feita.
+  const [searchTerm, setSearchTerm] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.hash.split('?')[1] || '');
+      return (p.get('nf') || p.get('busca') || '').trim();
+    } catch { return ''; }
+  });
   const [filterDriver, setFilterDriver] = useState('');
   const [filterVehicle, setFilterVehicle] = useState('');
   const [filterStatus, setFilterStatus] = useState('');

@@ -34,11 +34,43 @@ function perfilDaTela(tipo: string): Perfil | null {
   }
 }
 
+/**
+ * Link direto para a tela do vendedor. Outra aplicação da empresa manda o
+ * vendedor acompanhar o pedido aqui, e o link caía na escolha de perfil — o
+ * site não tinha endereço por tela. Agora:
+ *   https://entregacerta1.vercel.app/#vendedor           → tela do vendedor
+ *   https://entregacerta1.vercel.app/#vendedor?nf=37318  → já buscando a NF
+ * Hash (#) e não caminho (/vendedor) porque funciona sem configurar nada na
+ * hospedagem e o navegador não manda o trecho depois do # para o servidor.
+ */
+const LINK_VENDEDOR = '#vendedor';
+
+function estaNoLinkDoVendedor(): boolean {
+  try { return window.location.hash.toLowerCase().startsWith(LINK_VENDEDOR); } catch { return false; }
+}
+
 const App: React.FC = () => {
-  // Retoma direto no painel se a sessão ainda vale, em vez de sempre começar do zero.
+  // Link do vendedor manda; senão retoma o painel do gestor se a sessão ainda vale.
   const [view, setView] = useState<ViewState>(() =>
-    sessaoValida('gestor') ? { type: 'ADMIN_DASHBOARD' } : { type: 'ROLE_SELECT' }
+    estaNoLinkDoVendedor() ? { type: 'SELLER_VIEW' }
+      : sessaoValida('gestor') ? { type: 'ADMIN_DASHBOARD' }
+      : { type: 'ROLE_SELECT' }
   );
+
+  // Endereço acompanha a tela do vendedor: entrar pelo card põe #vendedor (o F5
+  // continua nela), sair tira (o F5 não volta para ela). Colar o link com o
+  // site já aberto também leva para lá.
+  useEffect(() => {
+    const naTela = view.type === 'SELLER_VIEW';
+    if (naTela && !estaNoLinkDoVendedor()) history.replaceState(null, '', LINK_VENDEDOR);
+    if (!naTela && estaNoLinkDoVendedor()) history.replaceState(null, '', window.location.pathname + window.location.search);
+  }, [view.type]);
+
+  useEffect(() => {
+    const aoMudar = () => { if (estaNoLinkDoVendedor()) setView({ type: 'SELLER_VIEW' }); };
+    window.addEventListener('hashchange', aoMudar);
+    return () => window.removeEventListener('hashchange', aoMudar);
+  }, []);
 
   // Definido DURANTE a renderização, não num efeito: os efeitos dos filhos rodam
   // antes dos do pai, e a primeira busca de dados do painel sairia sem token.
