@@ -78,6 +78,21 @@ const formatCurrency = (value?: number) => {
 // e o banco só devolve as notas dele; o usuário em branco ainda aceita a senha
 // compartilhada antiga, durante a transição. Detalhes em services/sessao.ts.
 
+/**
+ * NF (ou texto) pedida pelo link direto: #vendedor?nf=37318, #vendedor?busca=…
+ * ou, para sistema que corta o trecho depois do #, ?nf=37318 no endereço.
+ */
+export function buscaDoLinkVendedor(): string {
+  try {
+    for (const trecho of [window.location.hash.split('?')[1], window.location.search]) {
+      const p = new URLSearchParams(trecho || '');
+      const valor = (p.get('nf') || p.get('busca') || '').trim();
+      if (valor) return valor;
+    }
+  } catch { }
+  return '';
+}
+
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [authenticated, setAuthenticated] = useState(() => sessaoValida('vendedor'));
   const [passwordInput, setPasswordInput] = useState('');
@@ -107,12 +122,19 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
 
   // ── filtros ────────────────────────────────────────────────────────────────
   // Link direto (#vendedor?nf=37318 ou ?busca=...) já abre com a busca feita.
-  const [searchTerm, setSearchTerm] = useState(() => {
-    try {
-      const p = new URLSearchParams(window.location.hash.split('?')[1] || '');
-      return (p.get('nf') || p.get('busca') || '').trim();
-    } catch { return ''; }
-  });
+  const [searchTerm, setSearchTerm] = useState(buscaDoLinkVendedor);
+
+  // Link aberto com a tela já aberta na mesma aba (a outra aplicação reaproveita
+  // a aba): só o # muda, a página não recarrega e o useState acima não roda de
+  // novo. Sem isto ficava a busca da nota anterior.
+  useEffect(() => {
+    const aoMudar = () => {
+      const busca = buscaDoLinkVendedor();
+      if (busca) { setSearchTerm(busca); setActiveTab('notas'); }
+    };
+    window.addEventListener('hashchange', aoMudar);
+    return () => window.removeEventListener('hashchange', aoMudar);
+  }, []);
   const [filterDriver, setFilterDriver] = useState('');
   const [filterVehicle, setFilterVehicle] = useState('');
   const [filterStatus, setFilterStatus] = useState('');

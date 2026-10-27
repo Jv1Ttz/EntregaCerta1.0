@@ -5,7 +5,7 @@ import { ViewState } from './types';
 import { AdminView } from './components/AdminView';
 import { DriverView } from './components/DriverView';
 import { AdminAuditView } from './components/AdminAuditView';
-import { SellerView } from './components/SellerView';
+import { SellerView, buscaDoLinkVendedor } from './components/SellerView';
 import { RoteirizacaoView } from './components/RoteirizacaoView';
 import { ZonasView } from './components/ZonasView';
 import { Smartphone, Monitor, ShieldCheck, Truck, Lock, ChevronLeft, AlertCircle, Sun, Moon, Loader2, Eye, EyeOff, Sparkles, Crown, ShoppingBag } from 'lucide-react';
@@ -40,13 +40,14 @@ function perfilDaTela(tipo: string): Perfil | null {
  * site não tinha endereço por tela. Agora:
  *   https://entregacerta1.vercel.app/#vendedor           → tela do vendedor
  *   https://entregacerta1.vercel.app/#vendedor?nf=37318  → já buscando a NF
+ *   https://entregacerta1.vercel.app/?nf=37318           → idem, para quem corta o #
  * Hash (#) e não caminho (/vendedor) porque funciona sem configurar nada na
  * hospedagem e o navegador não manda o trecho depois do # para o servidor.
  */
 const LINK_VENDEDOR = '#vendedor';
 
 function estaNoLinkDoVendedor(): boolean {
-  try { return window.location.hash.toLowerCase().startsWith(LINK_VENDEDOR); } catch { return false; }
+  try { return window.location.hash.toLowerCase().startsWith(LINK_VENDEDOR) || buscaDoLinkVendedor() !== ''; } catch { return false; }
 }
 
 const App: React.FC = () => {
@@ -63,7 +64,7 @@ const App: React.FC = () => {
   useEffect(() => {
     const naTela = view.type === 'SELLER_VIEW';
     if (naTela && !estaNoLinkDoVendedor()) history.replaceState(null, '', LINK_VENDEDOR);
-    if (!naTela && estaNoLinkDoVendedor()) history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (!naTela && estaNoLinkDoVendedor()) history.replaceState(null, '', window.location.pathname);
   }, [view.type]);
 
   useEffect(() => {
