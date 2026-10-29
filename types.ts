@@ -92,6 +92,13 @@ export interface Invoice {
   deleted_reason?: string | null;
   /** Rota em que a nota foi tratada (FK routes.id). null = notas antigas / sem rota. */
   route_id?: string | null;
+  /** Vendedor lido das informações adicionais da NF (ingestão). */
+  vendedor?: string | null;
+  /** Endereço de entrega já separado em partes (ingestão). */
+  end_logradouro?: string | null;
+  end_bairro?: string | null;
+  end_municipio?: string | null;
+  end_uf?: string | null;
 }
 
 /**

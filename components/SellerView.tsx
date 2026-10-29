@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../services/db';
 import { sessaoValida, entrar, encerrarSessao, statusVendedor, entrarVendedor, vendedorLogado } from '../services/sessao';
 import { geocodeInvoice } from '../services/geocode';
+import { NotaCartao } from './NotaCartao';
 import { Invoice, Driver, Vehicle, DeliveryStatus, DeliveryProof } from '../types';
 import { isReturnProof, formatProofReason } from '../constants/returnReasons';
 import { Search, ChevronLeft, ChevronRight, Loader2, X, TrendingUp, Clock, CheckCircle, AlertTriangle, AlertOctagon, RotateCw, Package, ArrowUp, ArrowDown, ExternalLink, FileText, User, Map as MapIcon, Printer, ZoomIn, ZoomOut, Eye, EyeOff, Truck, Satellite, Navigation2 } from 'lucide-react';
@@ -82,15 +83,18 @@ const formatCurrency = (value?: number) => {
  * NF (ou texto) pedida pelo link direto: #vendedor?nf=37318, #vendedor?busca=…
  * ou, para sistema que corta o trecho depois do #, ?nf=37318 no endereço.
  */
-export function buscaDoLinkVendedor(): string {
+function parametroDoLink(nome: 'nf' | 'busca'): string {
   try {
     for (const trecho of [window.location.hash.split('?')[1], window.location.search]) {
-      const p = new URLSearchParams(trecho || '');
-      const valor = (p.get('nf') || p.get('busca') || '').trim();
+      const valor = (new URLSearchParams(trecho || '').get(nome) || '').trim();
       if (valor) return valor;
     }
   } catch { }
   return '';
+}
+
+export function buscaDoLinkVendedor(): string {
+  return parametroDoLink('nf') || parametroDoLink('busca');
 }
 
 export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
@@ -121,16 +125,20 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
   const [loading, setLoading] = useState(true);
 
   // ── filtros ────────────────────────────────────────────────────────────────
-  // Link direto (#vendedor?nf=37318 ou ?busca=...) já abre com a busca feita.
-  const [searchTerm, setSearchTerm] = useState(buscaDoLinkVendedor);
+  // Link direto: ?nf=37318 abre o cartão daquela nota (NotaCartao); ?busca=...
+  // abre a lista já filtrada.
+  const [notaDoLink, setNotaDoLink] = useState(() => parametroDoLink('nf') || null);
+  const [searchTerm, setSearchTerm] = useState(() => parametroDoLink('busca'));
 
   // Link aberto com a tela já aberta na mesma aba (a outra aplicação reaproveita
   // a aba): só o # muda, a página não recarrega e o useState acima não roda de
   // novo. Sem isto ficava a busca da nota anterior.
   useEffect(() => {
     const aoMudar = () => {
-      const busca = buscaDoLinkVendedor();
-      if (busca) { setSearchTerm(busca); setActiveTab('notas'); }
+      const nf = parametroDoLink('nf');
+      const busca = parametroDoLink('busca');
+      if (nf) { setNotaDoLink(nf); setActiveTab('notas'); }
+      else if (busca) { setNotaDoLink(null); setSearchTerm(busca); setActiveTab('notas'); }
     };
     window.addEventListener('hashchange', aoMudar);
     return () => window.removeEventListener('hashchange', aoMudar);
@@ -547,6 +555,13 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
     }
   };
 
+  // Sai do cartão para a lista. Tira o ?nf do endereço para o F5 não voltar
+  // ao cartão depois que o vendedor já pediu a lista.
+  const verTodasAsNotas = () => {
+    setNotaDoLink(null);
+    try { history.replaceState(null, '', window.location.pathname + '#vendedor'); } catch { }
+  };
+
   const SortIcon = ({ colKey }: { colKey: string }) => {
     const s = sortConfig.find(s => s.key === colKey);
     if (!s) return null;
@@ -918,8 +933,22 @@ export const SellerView: React.FC<SellerViewProps> = ({ onBack }) => {
         </div>
       )}
 
-      {/* Aba Notas */}
-      {activeTab === 'notas' && (<div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
+      {/* Aba Notas — cartão de uma nota (link direto) ou a lista */}
+      {activeTab === 'notas' && notaDoLink && (
+        <NotaCartao
+          numero={notaDoLink}
+          notas={invoices}
+          carregando={loading}
+          drivers={drivers}
+          vehicles={vehicles}
+          carregandoComprovante={loadingProofId}
+          onComprovante={handleViewProof}
+          onSSW={openSSWTracking}
+          onVerNoMapa={handleTrackInvoiceVehicle}
+          onVerTodas={verTodasAsNotas}
+        />
+      )}
+      {activeTab === 'notas' && !notaDoLink && (<div className="max-w-7xl mx-auto px-4 py-6 space-y-4">
         {/* Filtros — mesmo padrão do gestor */}
         <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-3 shadow-sm">
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
